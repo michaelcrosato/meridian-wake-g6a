@@ -7,6 +7,7 @@ import {
 	UNIVERSE_SHIPS,
 	UNIVERSE_SYSTEMS,
 } from "./universe.js";
+import { createWikiArcs } from "./wiki-stories.js";
 
 export { SOURCE_COMMIT };
 export const SYSTEMS = UNIVERSE_SYSTEMS;
@@ -1229,6 +1230,13 @@ export const ARCS = [
 	]),
 ];
 ARCS.push(...createExpandedArcs({ mission }));
+const wikiArcs = createWikiArcs({ mission });
+const research = wikiArcs.find((arc) => arc.id === "wiki-research");
+research.missions[1].scanSystems = [
+	destination("Midgard"),
+	destination("Valhalla"),
+];
+ARCS.push(...wikiArcs);
 
 // Licenses are progression rewards, while ordinary human models remain open to an independent captain.
 for (const ship of SHIPS) {

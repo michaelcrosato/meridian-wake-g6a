@@ -1,5 +1,6 @@
 import "./style.css";
 import { AudioManager } from "./audio.js";
+import { fieldGuideBody } from "./field-guide.js";
 import {
 	CAMPAIGN,
 	COMMODITIES,
@@ -9,18 +10,19 @@ import {
 	SYSTEMS,
 } from "./game.js";
 import { brandMark, icon, shipDrawing } from "./icons.js";
-import { createScene } from "./scene.js";
 import {
 	BINDING_ACTIONS,
+	findFocus,
+	focusableElements,
+	focusToken,
 	InputController,
 	keyLabel,
 	remappableCode,
 	shortcutBlocked,
 	textEntry,
-	focusableElements,
-	focusToken,
-	findFocus,
 } from "./input.js";
+import { createScene } from "./scene.js";
+import { portVoices, regionFor, stardate } from "./wiki-content.js";
 
 const app = document.querySelector("#app");
 const SAVE_KEY = "meridian-wake-save-v1";
@@ -82,6 +84,7 @@ const graphicsRecoveryActions = new Set([
 	"fullscreen",
 	"about",
 	"catalog",
+	"guide",
 	"journal",
 	"ship",
 ]);
@@ -97,6 +100,8 @@ let dialogueDeferred = false;
 let focusedWindow = true;
 let catalog;
 let catalogQuery = "";
+let guideQuery = "";
+let guideCategory = "All";
 let shopQuery = "";
 let shopPage = 0;
 let sourceLoading = false;
@@ -545,6 +550,18 @@ function renderPanel() {
 			return renderDestroyed();
 		case "about":
 			return renderAbout();
+		case "guide":
+			return modal(
+				"The captain’s field guide",
+				stardate(state().day),
+				fieldGuideBody(game, {
+					query: guideQuery,
+					category: guideCategory,
+					esc,
+				}),
+				'<button data-action="catalog">Source archive</button>',
+				true,
+			);
 		case "catalog":
 			return renderCatalog();
 		case "sourceDialogue":
@@ -589,6 +606,7 @@ function renderPort() {
 		portTab = "missions";
 	const content = {
 		missions: renderMissions,
+		concourse: renderConcourse,
 		contacts: renderContacts,
 		market: renderMarket,
 		shipyard: renderShipyard,
@@ -597,6 +615,7 @@ function renderPort() {
 	};
 	const tabs = `<nav class="port-tabs" aria-label="Spaceport facilities">${[
 		["missions", sy.inhabited ? "Spaceport" : "Surface survey"],
+		["concourse", "Concourse"],
 		["contacts", "Local contacts"],
 		["market", "Trading post"],
 		["outfitter", "Outfitter"],
@@ -615,7 +634,7 @@ function renderMissions() {
 	const sy = current(),
 		s = state(),
 		story = getStory();
-	return `<div class="port-summary"><div><div class="eyebrow">Welcome ashore, Captain</div><p>${esc(sy.description || "Beyond the airlock, a thousand journeys cross paths. Find a cargo, a cause, or a new corner of the sky.")}</p></div><div class="port-data"><div>Local authority <strong>${esc(sy.faction || "Independent")}</strong></div><div>Flight services <strong>${sy.inhabited ? "Fuel & repairs" : "None · remote landing"}</strong></div><div>Open contracts <strong>${game.availableJobs().length} available</strong></div></div></div>${story ? storyCard(story) : '<div class="story-card"><div class="eyebrow">The story continues</div><h3>A sky of your own.</h3><p>Your main voyage is complete. There are still contracts, distant worlds, and other lives to discover.</p></div>'}<h3 class="section-label">Jobs board / ${game.availableJobs().length} available</h3><div class="job-list">${
+	return `<div class="port-summary"><div><div class="eyebrow">Welcome ashore, Captain / ${esc(stardate(s.day))}</div><p>${esc(sy.description || "Beyond the airlock, a thousand journeys cross paths. Find a cargo, a cause, or a new corner of the sky.")}</p></div><div class="port-data"><div>Local authority <strong>${esc(sy.faction || "Independent")}</strong></div><div>Flight services <strong>${sy.inhabited ? "Fuel & repairs" : "None · remote landing"}</strong></div><div>Open contracts <strong>${game.availableJobs().length} available</strong></div></div></div>${story ? storyCard(story) : '<div class="story-card"><div class="eyebrow">The story continues</div><h3>A sky of your own.</h3><p>Your main voyage is complete. There are still contracts, distant worlds, and other lives to discover.</p></div>'}<h3 class="section-label">Jobs board / ${game.availableJobs().length} available</h3><div class="job-list">${
 		game
 			.availableJobs()
 			.map((j) => jobCard(j))
@@ -627,6 +646,17 @@ function renderMissions() {
 			.join("") ||
 		'<p class="muted small">New opportunities will appear as your reputation and reach grow.</p>'
 	}</div>`;
+}
+function renderConcourse() {
+	const planet = game.currentPlanet();
+	const region = regionFor(current(), planet);
+	const voices = portVoices(game);
+	const stories = getArcs().filter(
+		(a) => a.adaptation === "original-wiki-story",
+	);
+	return `<div class="concourse-intro"><div class="eyebrow">${esc(stardate(state().day))} / ${esc(region?.name || current().faction)}</div><h3>Beyond the arrivals hall</h3><p class="spaceport-prose">${esc(planet?.spaceport || planet?.description || "Quiet footsteps echo through the docking concourse.")}</p><button data-action="guide">Open the field guide ${icon("book")}</button></div>
+	<h3 class="section-label">Around the concourse</h3><div class="concourse-voices">${voices.map((v) => `<article class="concourse-voice"><div class="eyebrow">${esc(v.speaker)}</div><p>${esc(v.text)}</p></article>`).join("")}</div>
+	<h3 class="section-label">Lives between the stars</h3><p class="small muted">Small journeys with consequences for the people you meet. Each story can share a voyage with ordinary freight or your main mission.</p><div class="job-list">${stories.map(arcCard).join("") || '<p class="muted">You have completed these civilian stories. Their outcomes remain in your journal.</p>'}</div>`;
 }
 function missionRoutes(m) {
 	const active = m.arcId
@@ -669,12 +699,31 @@ function storyCard(story) {
 	return `<article class="story-card"><div class="eyebrow">${esc(story.chapter || "Main transmission")} <span class="muted">/</span> ${story.accepted ? "In progress" : "A story worth following"}</div><h3>${esc(story.name || story.title)}</h3><p>${esc(story.description)}</p><div class="requirements">${esc(story.objective || story.kind || "Mission")}${dest ? ` <span class="muted">/ Destination: ${esc(dest.name)}</span>` : ""}</div><div class="button-row">${actions}${story.reward ? `<span class="small accent" style="align-self:center">${money(story.reward)} cr on completion</span>` : ""}</div>${missionRoutes(story)}</article>`;
 }
 
+function jobRouteButtons(job) {
+	const ids = [
+		...new Set([
+			...(job.scanSystems || []).filter(
+				(id) => !(job.scannedSystems || []).includes(id),
+			),
+			...(job.stops || [])
+				.filter((stop) => !(job.visitedPlanets || []).includes(stop.planetName))
+				.map((stop) => stop.systemId),
+			job.destinationId,
+		]),
+	];
+	return ids
+		.map(
+			(id) =>
+				`<button data-action="map" data-id="${esc(id)}">Route: ${esc(systemById(id)?.name || id)}</button>`,
+		)
+		.join("");
+}
 function jobCard(job) {
 	const dest = systemById(job.destinationId || job.destination),
 		accepted = state().jobs?.some(
 			(j) => (typeof j === "string" ? j : j.id) === job.id,
 		);
-	return `<article class="job-card"><div class="job-icon">${icon(job.passengers ? "people" : job.kind === "bounty" ? "shield" : "cargo")}</div><div><h4>${esc(job.name || job.title)}</h4><p>${esc(job.description || `${dest?.name || job.destinationId || ""} · ${job.cargo || 0}t cargo · ${job.passengers || 0} passengers`)}</p><p class="muted small">${job.cargo || 0}t cargo · ${job.passengers || 0} berths · Due day ${job.deadline}</p></div><div><div class="reward">${money(job.reward)} cr</div><button data-action="acceptJob" data-id="${esc(job.id)}" ${accepted ? "disabled" : ""}>${accepted ? "Accepted" : "Accept job"}</button></div></article>`;
+	return `<article class="job-card"><div class="job-icon">${icon(job.passengers ? "people" : job.kind === "bounty" ? "shield" : "cargo")}</div><div><div class="eyebrow">${esc(job.issuer || "Freelance contract")}</div><h4>${esc(job.name || job.title)}</h4><p>${esc(job.description || `${dest?.name || job.destinationId || ""} · ${job.cargo || 0}t cargo · ${job.passengers || 0} passengers`)}</p><p class="small cyan">${esc(game.jobObjective(job))}</p><p class="muted small">${job.cargo || 0}t cargo · ${job.passengers || 0} berths · Due day ${job.deadline}</p></div><div><div class="reward">${money(job.reward)} cr</div><button data-action="acceptJob" data-id="${esc(job.id)}" ${accepted ? "disabled" : ""}>${accepted ? "Accepted" : "Accept job"}</button></div></article>`;
 }
 function arcCard(a) {
 	const destination = systemById(a.targetId || a.destinationId);
@@ -802,7 +851,7 @@ function renderOutfitter() {
 				: state().outfits?.[o.id] || 0;
 			return `<article class="item-card"><div class="eyebrow">${esc(o.category || o.type || "Ship systems")} ${n ? `<span class="tag">Installed ×${n}</span>` : ""}</div><h3>${esc(o.name)}</h3><p>${esc(o.description)}</p><div class="item-stats">${o.space ? `<span>SPACE <b>${o.space}t</b></span>` : ""}${o.energy ? `<span>ENERGY <b>${o.energy}</b></span>` : ""}</div>${o.category === "Ammunition" ? `<span class="small cyan">${state().ammo?.[o.id] || 0} rounds aboard</span><button data-action="buyAmmo" data-id="${o.id}" data-quantity="${buyQuantity}" ${!buyQuantity ? "disabled" : ""}>${buyQuantity ? `Buy ${buyQuantity} · ${money(o.price * buyQuantity)} cr` : game.ammoCapacity?.(o.id) ? "Magazines full" : "Compatible storage required"}</button>` : `<button data-action="buyOutfit" data-id="${o.id}">${money(o.price)} cr · ${Number(o.sourceAttributes?.map) > 0 ? "Download charts" : "Install"}</button>`}</article>`;
 		})
-		.join("")}</div>`;
+		.join("")}</div>${renderOutfitStorage()}`;
 }
 function shopSearch(count) {
 	return `<input class="codex-search" type="search" id="shop-search" placeholder="Search local inventory…" aria-label="Search local inventory" value="${esc(shopQuery)}"><div class="market-info"><span>${count} available locally · Page ${shopPage + 1} / ${Math.max(1, Math.ceil(count / 24))}</span><span><button data-action="shopPrev" ${shopPage < 1 ? "disabled" : ""}>← Previous</button> <button data-action="shopNext" ${((shopPage + 1) * 24) >= count ? "disabled" : ""}>Next →</button></span></div>`;
@@ -811,9 +860,43 @@ function renderHangar() {
 	const parked = game.parkedShips?.() || [];
 	return `<h3 class="section-label">Owned ships / hangar</h3><div class="job-list">${parked.map((p) => `<article class="job-card"><div class="job-icon">${icon("ship")}</div><div><h4>${esc(p.name || p.model)}</h4><p>${p.contract ? "Contracted · " : "Owned · "}${esc(p.model)} · Hull ${Math.ceil(p.hull ?? p.stats.maxHull)}/${p.stats.maxHull} · ${(p.outfits || []).length} upgrades stored</p><p>${p.stats.cargoCapacity}t hold · ${p.stats.passengerCapacity} bunks</p></div><div class="arc-options">${p.contract ? `<button data-action="buyoutEscort" data-id="${esc(p.id)}" data-scope="fleet">Buy hull · ${money(p.stats.price - (p.bond || 5000))} cr</button>` : `<button data-action="switchShip" data-id="${esc(p.id)}">Make flagship</button>`}<button data-action="deployShip" data-id="${esc(p.id)}">Deploy escort</button><button data-action="sellParked" data-id="${esc(p.id)}">Sell · ${money(p.saleValue)} cr</button></div></article>`).join("") || '<div class="empty-state">Your hangar is empty. Buy a ship outright, park an escort, or earn a ship through a story.</div>'}</div>`;
 }
+function renderOutfitStorage() {
+	const local = game.storageAt();
+	const elsewhere = Object.entries(state().outfitStorage).filter(
+		([name]) => name !== game.currentPlanet()?.name,
+	);
+	return `<h3 class="section-label">Your upgrades / storage on ${esc(game.currentPlanet()?.name || "this world")}</h3><p class="small muted">Store an installed upgrade here without selling it. Return to this planet to install it on your current flagship, free of charge. Built-in equipment stays with its hull.</p>
+	<div class="job-list">${[...new Set(state().outfits)]
+		.map((id) => {
+			const outfit = outfits.find((o) => o.id === id);
+			return `<article class="job-card"><div class="job-icon">${icon("bolt")}</div><div><h4>${esc(outfit?.name || id)}</h4><p>Installed ×${state().outfits.filter((x) => x === id).length}</p></div><button data-action="storeOutfit" data-id="${esc(id)}">Store on this planet</button></article>`;
+		})
+		.join("")}</div>
+	<div class="job-list">${local.map(({ outfit, count }) => `<article class="job-card"><div class="job-icon">${icon("bolt")}</div><div><h4>${esc(outfit.name)}</h4><p>In local storage ×${count} · ${outfit.space} outfit space</p></div><div class="arc-options"><button data-action="installStoredOutfit" data-id="${esc(outfit.id)}">Install from storage</button><button data-action="sellStoredOutfit" data-id="${esc(outfit.id)}">Sell stored · ${money(Math.floor(outfit.price * 0.7))} cr</button></div></article>`).join("") || '<p class="small muted">No upgrades stored here.</p>'}</div>
+	${
+		elsewhere.length
+			? `<h4>Stored on other worlds</h4>${elsewhere
+					.map(
+						([name, stock]) =>
+							`<p class="small muted">${esc(name)}: ${Object.entries(stock)
+								.map(
+									([id, count]) =>
+										`${esc(outfits.find((o) => o.id === id)?.name || id)} ×${count}`,
+								)
+								.join(", ")}</p>`,
+					)
+					.join("")}`
+			: ""
+	}`;
+}
+function renderBank() {
+	const bank = game.bankStatus();
+	return `<article class="item-card"><div class="eyebrow">Ship account / credit rating ${bank.score}</div><h3>${money(state().debt)} cr</h3><p>Daily mortgage payment: <strong>${money(bank.installment)} cr</strong>. Crew wages: ${money(bank.wages)} cr / day. The current blended interest rate is ${(bank.rate * 100).toFixed(3)}% per day.</p><p class="small muted">Travel advances the day. Wages are paid first, then the bank collects a full installment if funds cover it. Paid installments raise your rating; missed payments lower it by five and add interest to the balance.</p><div class="button-row"><button data-action="payDebt" data-amount="1000" ${!state().debt ? "disabled" : ""}>Pay 1,000 cr</button><button data-action="payDebt" data-amount="${Math.min(state().debt, state().credits)}" ${!state().debt || !state().credits ? "disabled" : ""}>Pay maximum</button></div></article>
+	<article class="item-card"><div class="eyebrow">New borrowing</div><h3>${money(bank.allowance)} cr available</h3><p>Average operating income: ${money(bank.averageIncome)} cr / day over the last 100 days. Existing debt reduces your limit. Unrecorded days count as zero; borrowing and selling ships or outfits do not count as operating income.</p><p>New funds: ${(bank.newRate * 100).toFixed(3)}% interest per day, with repayment spread across 365 travel days.</p><label class="small muted" for="loan-amount">Amount to borrow (credits)</label><input class="codex-search" id="loan-amount" type="number" min="100" max="${bank.allowance}" step="100" value="${Math.min(10000, bank.allowance)}" ${bank.allowance < 100 ? "disabled" : ""}><button data-action="borrow" ${bank.allowance < 100 ? "disabled" : ""}>Take loan</button>${bank.statement ? `<p class="small muted">Last statement / day ${bank.statement.day}: wages ${money(bank.statement.wages)}, interest ${money(bank.statement.interest)}, mortgage paid ${money(bank.statement.payment)} cr${bank.statement.missed ? " · Payment missed" : ""}.</p>` : ""}</article>`;
+}
 function renderFleet() {
 	const s = state();
-	return `<div class="item-grid"><article class="item-card"><div class="eyebrow">Ship account</div><h3>${money(s.debt)} cr</h3><p>Outstanding ship loan. Loan interest and crew wages accrue when you travel. Pay down the balance to keep more of what you earn.</p><div class="button-row"><button data-action="payDebt" data-amount="1000">Pay 1,000 cr</button><button data-action="payDebt" data-amount="${Math.min(s.debt, s.credits)}">Pay maximum</button></div></article><article class="item-card"><div class="eyebrow">Fleet command</div><h3>${Array.isArray(s.escorts) ? s.escorts.length : s.escorts || 0} escort ships</h3><p>Hire a wingmate for protection and stronger combat support. Escort wages come due with each day of travel.</p><button data-action="hireEscort">Recruit · ${money(14000 + s.escorts.length * 2000)} cr</button><span class="small muted">90 cr / day per escort</span></article><article class="item-card"><div class="eyebrow">Flight services</div><h3>Ready for the black</h3><p>Local crews keep your ship flying. Repairs restore your hull and shields; fuel extends your reach between systems.</p><div class="button-row"><button data-action="repair">Repair ship</button><button data-action="refuel">Refuel</button></div></article></div><div class="settings-row"><div><strong>Extra crew: ${s.extraCrew || 0}</strong><p>Additional crew occupies berths, earns 15 cr daily, and helps capture hostile ships.</p></div><div class="button-row"><button data-action="hireCrew">Hire · 200 cr</button><button data-action="dismissCrew" ${!s.extraCrew ? "disabled" : ""}>Release crew</button></div></div><h3 class="section-label">Your wing</h3><div class="job-list">${s.escorts.map((e) => `<article class="job-card"><div class="job-icon">${icon("ship")}</div><div><h4>${esc(e.name)}</h4><p>Hull ${Math.ceil(e.hull)} / ${e.maxHull} · ${esc(e.command)}</p><div class="button-row">${["protect", "attack", "hold"].map((c) => `<button data-action="fleetCommand" data-id="${c}" data-escort="${esc(e.id)}" ${e.command === c ? "disabled" : ""}>${c}</button>`).join("")}</div></div><div class="arc-options"><button data-action="parkEscort" data-id="${esc(e.id)}">Park in hangar</button>${e.contract ? `<button data-action="buyoutEscort" data-id="${esc(e.id)}">Buy hull · ${money((ships.find((x) => x.id === e.shipId)?.price || 45000) - (e.bond || 5000))} cr</button><button data-action="dismissEscort" data-id="${esc(e.id)}">Release · ${money(e.bond || 5000)} cr</button>` : ""}</div></article>`).join("") || '<p class="small muted">No wingmates yet. Recruit an escort or capture a disabled ship.</p>'}</div>${renderHangar()}`;
+	return `<div class="item-grid">${renderBank()}<article class="item-card"><div class="eyebrow">Fleet command</div><h3>${Array.isArray(s.escorts) ? s.escorts.length : s.escorts || 0} escort ships</h3><p>Hire a wingmate for protection and stronger combat support. Escort wages come due with each day of travel.</p><button data-action="hireEscort">Recruit · ${money(14000 + s.escorts.length * 2000)} cr</button><span class="small muted">90 cr / day per escort</span></article><article class="item-card"><div class="eyebrow">Flight services</div><h3>Ready for the black</h3><p>Local crews keep your ship flying. Repairs restore your hull and shields; fuel extends your reach between systems.</p><div class="button-row"><button data-action="repair">Repair ship</button><button data-action="refuel">Refuel</button></div></article></div><div class="settings-row"><div><strong>Extra crew: ${s.extraCrew || 0}</strong><p>Additional crew occupies berths, earns 15 cr daily, and helps capture hostile ships.</p></div><div class="button-row"><button data-action="hireCrew">Hire · 200 cr</button><button data-action="dismissCrew" ${!s.extraCrew ? "disabled" : ""}>Release crew</button></div></div><h3 class="section-label">Your wing</h3><div class="job-list">${s.escorts.map((e) => `<article class="job-card"><div class="job-icon">${icon("ship")}</div><div><h4>${esc(e.name)}</h4><p>Hull ${Math.ceil(e.hull)} / ${e.maxHull} · ${esc(e.command)}</p><div class="button-row">${["protect", "attack", "hold"].map((c) => `<button data-action="fleetCommand" data-id="${c}" data-escort="${esc(e.id)}" ${e.command === c ? "disabled" : ""}>${c}</button>`).join("")}</div></div><div class="arc-options"><button data-action="parkEscort" data-id="${esc(e.id)}">Park in hangar</button>${e.contract ? `<button data-action="buyoutEscort" data-id="${esc(e.id)}">Buy hull · ${money((ships.find((x) => x.id === e.shipId)?.price || 45000) - (e.bond || 5000))} cr</button><button data-action="dismissEscort" data-id="${esc(e.id)}">Release · ${money(e.bond || 5000)} cr</button>` : ""}</div></article>`).join("") || '<p class="small muted">No wingmates yet. Recruit an escort or capture a disabled ship.</p>'}</div>${renderHangar()}`;
 }
 function renderMap() {
 	const sy = current(),
@@ -907,7 +990,7 @@ function renderJournal() {
 	return modal(
 		"The captain’s journal",
 		"Your choices leave a wake",
-		`${story ? storyCard(story) : ""}<h3 class="section-label">Active contracts</h3><div class="job-list">${(s.jobs || []).map((j) => `<article class="job-card"><div class="job-icon">${icon("cargo")}</div><div><h4>${esc(j.name || j.title || j.id)}</h4><p>${esc(j.description || "")} · Destination: ${esc(systemById(j.destinationId || j.destination)?.name || j.destinationId || j.destination || "Check objective")} ${j.deadline ? `· Due day ${j.deadline}` : ""}</p></div><button data-action="abandonJob" data-id="${esc(j.id)}">Abandon</button></article>`).join("") || '<div class="empty-state">Your hold is clear of commitments.<br>Visit a spaceport jobs board to pick up work.</div>'}</div><h3 class="section-label">Side stories</h3><div class="job-list">${
+		`${story ? storyCard(story) : ""}<h3 class="section-label">Active contracts</h3><div class="job-list">${(s.jobs || []).map((j) => `<article class="job-card"><div class="job-icon">${icon("cargo")}</div><div><h4>${esc(j.name || j.title || j.id)}</h4><p>${esc(game.jobObjective(j))} · Destination: ${esc(systemById(j.destinationId || j.destination)?.name || j.destinationId || j.destination || "Check objective")} ${j.deadline ? `· Due day ${j.deadline}` : ""}</p></div><div class="arc-options">${jobRouteButtons(j)}<button data-action="abandonJob" data-id="${esc(j.id)}">Abandon</button></div></article>`).join("") || '<div class="empty-state">Your hold is clear of commitments.<br>Visit a spaceport jobs board to pick up work.</div>'}</div><h3 class="section-label">Side stories</h3><div class="job-list">${
 			getArcs()
 				.filter((a) => a.accepted)
 				.map(arcCard)
@@ -923,7 +1006,7 @@ function renderJournal() {
 				.join("") ||
 			'<p class="muted small">The first page of your story is still blank.</p>'
 		}`,
-		`<span>${s.kills || 0} hostiles defeated · ${s.visited?.length || 1} systems visited</span><button data-action="catalog">Galaxy archive ${icon("book")}</button>`,
+		`<span>${s.kills || 0} hostiles defeated · ${s.visited?.length || 1} systems visited</span><div class="button-row"><button data-action="guide">Field guide ${icon("book")}</button><button data-action="catalog">Galaxy archive</button></div>`,
 	);
 }
 function renderSecondary() {
@@ -1203,7 +1286,7 @@ function renderAbout() {
 	return modal(
 		"Meridian Wake",
 		"A spacefaring adventure",
-		`<p class="small muted">A browser reimagining of <a href="https://github.com/endless-sky/endless-sky" target="_blank" rel="noopener" class="cyan">Endless Sky</a>, the open-source space trading, exploration, and combat game. Built with original low-poly brick spacecraft and adapted source storylines.</p><div class="separator"></div><div class="eyebrow">Generation record</div><p class="small">26 September 2026 · GPT-6 Astra (g6a)</p><div class="eyebrow">Credits</div><p class="small muted">Universe, names, source stories, and placeholder audio: the Endless Sky contributors. Source material is credited in the repository’s attribution and completion report. Interface, procedural geometry, and browser adaptation are new to Meridian Wake.</p><p class="small muted">Rendering: Three.js WebGPU with automatic WebGL2 fallback. Physics: Rapier. Typeface: Lato by Łukasz Dziedzic. Internal, non-commercial testing build.</p><div class="button-row"><button data-action="catalog">Explore the source archive ${icon("book")}</button></div>`,
+		`<p class="small muted">A browser reimagining of <a href="https://github.com/endless-sky/endless-sky" target="_blank" rel="noopener" class="cyan">Endless Sky</a>, the open-source space trading, exploration, and combat game. Built with original low-poly brick spacecraft and adapted source storylines.</p><div class="separator"></div><div class="eyebrow">Generation record</div><p class="small">26 September 2026 · GPT-6 Astra (g6a)</p><div class="eyebrow">Credits</div><p class="small muted">Universe, names, source stories, and placeholder audio: the Endless Sky contributors. Source material is credited in the repository’s attribution and completion report. Interface, procedural geometry, and browser adaptation are new to Meridian Wake.</p><p class="small muted">Rendering: Three.js WebGPU with automatic WebGL2 fallback. Physics: Rapier. Typeface: Lato by Łukasz Dziedzic. Internal, non-commercial testing build.</p><div class="button-row"><button data-action="guide">Read the field guide</button><button data-action="catalog">Explore the source archive ${icon("book")}</button></div>`,
 		"<span>Independent stars. Shared beginnings.</span>",
 		true,
 	);
@@ -1350,6 +1433,11 @@ async function handleAction(action, el) {
 		render();
 		return;
 	}
+	if (action === "guideCategory") {
+		guideCategory = id;
+		render();
+		return;
+	}
 	if (action === "portTab") {
 		portTab = id;
 		if (id === "contacts") {
@@ -1375,6 +1463,7 @@ async function handleAction(action, el) {
 			"flightActions",
 			"about",
 			"catalog",
+			"guide",
 			"port",
 		].includes(action)
 	) {
@@ -1480,6 +1569,9 @@ async function handleAction(action, el) {
 			"buyShip",
 			"buyOutfit",
 			"sellOutfit",
+			"storeOutfit",
+			"installStoredOutfit",
+			"sellStoredOutfit",
 			"acceptJob",
 			"abandonJob",
 			"acceptArc",
@@ -1490,6 +1582,9 @@ async function handleAction(action, el) {
 			buyShip: "shipId",
 			buyOutfit: "outfitId",
 			sellOutfit: "outfitId",
+			storeOutfit: "outfitId",
+			installStoredOutfit: "outfitId",
+			sellStoredOutfit: "outfitId",
 			acceptJob: "jobId",
 			abandonJob: "jobId",
 			acceptArc: "arcId",
@@ -1586,6 +1681,10 @@ async function handleAction(action, el) {
 	}
 	if (action === "story") {
 		act("story", { choice: el.dataset.choice || "complete" });
+		return;
+	}
+	if (action === "borrow") {
+		act("borrow", { amount: Number($("#loan-amount")?.value) });
 		return;
 	}
 	if (action === "payDebt") {
@@ -1753,6 +1852,14 @@ app.addEventListener("input", (event) => {
 		const input = $("#shop-search");
 		input?.focus();
 		input?.setSelectionRange(start, start);
+	}
+	if (el.id === "guide-search") {
+		guideQuery = el.value;
+		const position = el.selectionStart;
+		render();
+		const input = $("#guide-search");
+		input?.focus();
+		input?.setSelectionRange(position, position);
 	}
 	if (el.id === "catalog-search") {
 		catalogQuery = el.value;

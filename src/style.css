@@ -2291,3 +2291,63 @@ html[data-touch-controls="off"] .touch-controls {
 	background: none;
 	border: 1px solid var(--ink);
 }
+.concourse-intro {
+	border-bottom: 1px solid var(--line, #29404a);
+	padding-bottom: 24px;
+	margin-bottom: 24px;
+}
+.spaceport-prose {
+	white-space: pre-line;
+	line-height: 1.7;
+	max-width: 78ch;
+}
+.concourse-voices {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+	gap: 16px;
+}
+.concourse-voice,
+.guide-location {
+	border-left: 2px solid #73c6c5;
+	background: #a1e4da08;
+	padding: 18px;
+}
+.concourse-voice p,
+.guide-entry p {
+	line-height: 1.65;
+}
+.guide-location {
+	margin-bottom: 20px;
+}
+.guide-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 14px 0;
+}
+.guide-filters button,
+.concourse-intro > button {
+	min-height: 44px;
+	padding: 10px 14px;
+}
+.guide-filters [aria-pressed="true"] {
+	color: #9be5df;
+	border-color: #73c6c5;
+}
+.guide-entry {
+	border-bottom: 1px solid #29404a;
+	padding: 16px 0;
+}
+.guide-entry summary {
+	cursor: pointer;
+	line-height: 1.7;
+	font-weight: 700;
+}
+.guide-entry summary:focus-visible {
+	outline: 2px solid #9be5df;
+	outline-offset: 4px;
+}
+.guide-tip {
+	border-left: 2px solid #73c6c5;
+	padding-left: 14px;
+}

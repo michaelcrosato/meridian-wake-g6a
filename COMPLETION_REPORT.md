@@ -2,6 +2,8 @@
 
 Generated **26 September 2026** with **GPT-6 Astra (g6a)**.
 
+**27 September 2026 content expansion:** the official wiki now informs an in-game regional/organization/history field guide, spaceport concourses, four original civilian arcs (12 stages), seven freelance job types, daily mortgage and credit/borrowing rules, and permanent planet-local outfit storage. New contracts track exact landing planets and actual survey, tour and material-delivery objectives. See [the expansion record](docs/wiki-expansion.md) for source grounding, save migration, rules and browser checks. The original audit below describes the earlier release; its historical counts are not a count of these additions.
+
 Meridian Wake is a playable browser adaptation of Endless Sky, with a bank-financed beginning, two Free Worlds routes to an ending, and continued open-world play. It retains top-down inertial flight, trading, passenger and cargo work, combat, boarding, mining, outfit decisions, ship ownership, escorts and exploration. Narrative scale and combat are adapted for the browser.
 
 The authoritative source is pinned to [`3248c43994eb3d545265366c8eba909a6646f4d2`](https://github.com/endless-sky/endless-sky/tree/3248c43994eb3d545265366c8eba909a6646f4d2). The [source checklist](docs/source-audit.md), [per-stage story mapping](docs/expanded-campaign-audit.md), [convoy provenance](docs/campaign-convoys.md), and [per-declaration catalog](public/source-catalog.json) distinguish playable adaptations from imported native records.
