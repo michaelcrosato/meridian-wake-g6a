@@ -1,6 +1,6 @@
 # Browser, controls and responsive audit
 
-Audit date: **26 September 2026, America/Vancouver** (runs extend into 27 September UTC). Baseline: `de17cab`. This follow-up tests the playable game, fixes observed failures and adds repeatable browser checks. It preserves the original visual direction, campaign and shared Three.js node-material rendering path.
+Audit dates: **26–27 September 2026, America/Vancouver**. Baseline: `de17cab`. This follow-up tests the playable game, fixes observed failures and adds repeatable browser checks. It preserves the original visual direction, campaign and shared Three.js node-material rendering path.
 
 Local validation: **155/155 node tests**, **16/16 Chromium browser scenarios**, production build and source/audio verification pass. After the last graphics-recovery guard change, the expanded device-loss/export/reload scenario passed separately. CI reruns the complete regression suite before publication.
 
@@ -10,7 +10,7 @@ Chrome, Safari, Edge, Firefox and Opera together represented 95.5% of worldwide 
 
 | Actual browser / engine | Environment | Observed result |
 | --- | --- | --- |
-| Google Chrome 154.0.8037.57 | Linux / WSL2 | Opening mission, economy, audio, save/reload and 11-size layout matrix pass; corrected keyboard/focus scenario passes separately |
+| Google Chrome 154.0.8037.57 | Linux / WSL2 | All three compatibility scenarios pass together on the final application code, including all 11 sizes (2.1 minutes) |
 | Google Chrome 153.0.8010.53 | Windows hosted runner | All three compatibility scenarios pass, including all 11 sizes |
 | Microsoft Edge 154.0.4258.37 | Linux / WSL2 | Opening voyage/economy/audio/save scenario passes |
 | Microsoft Edge 153.0.4234.48 | Windows hosted runner | All three compatibility scenarios pass, including all 11 sizes |
@@ -22,9 +22,9 @@ Chrome, Safari, Edge, Firefox and Opera together represented 95.5% of worldwide 
 | Chromium 156.0.8076.0 AndroidDesktop_x64 snapshot 1705635 | Native Android 16 emulator, ANGLE Vulkan | Original game rendering and touch journey pass within a diagnostic environment. This is not stable Chrome Mobile; see [Android evidence and limits](android-compatibility.md) |
 | Native iPhone / iPad Safari | Apple iOS simulator on hosted macOS | Native validation is tracked separately below; desktop WebKit emulation does not count as a native pass |
 
-The compatibility journey uses actual browser input to buy/sell cargo, accept James's passage, thrust, turn/brake with arrow keys, fire, search the map, jump to Arcturus, dock, complete the mission, activate audio and reload saved progress. The separate WebDriver journey covers flight, story, audio and persistence, without claiming the trading scenario. Backend observations in these vendor-browser runs are **WebGL2 automatic fallback**. Earlier independent WebGPU checks remain in [verification evidence](verification.md).
+The compatibility journey uses actual browser input to buy/sell cargo, accept James's passage, thrust, turn/brake with arrow keys, fire, search the map, jump to Arcturus, dock, complete the mission, activate audio and reload saved progress. The separate WebDriver journey covers flight, story, audio and persistence, without claiming the trading scenario. Backend observations in these vendor-browser runs are **WebGL2 automatic fallback**. Earlier independent WebGPU checks remain in [verification evidence](verification.md). The Windows cumulative-timeout diagnosis is retained in [compact trace evidence](compatibility/windows-timeout-evidence.json).
 
-[Windows and desktop Safari CI evidence](https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301252982) contains per-job results and downloadable traces/screenshots. A run can be red because a native simulator job failed while its desktop jobs passed; inspect the individual jobs. [Compact checked-in evidence](compatibility/browser-evidence.json) retains browser versions, scenario results, viewports and native driver observations without temporary profiles or workstation paths.
+[Earlier successful Windows and desktop Safari jobs](https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36299000280) contain per-job results and downloadable traces/screenshots. A later [Windows rerun](https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301252982) passed the voyage and keyboard scenarios but exhausted the layout test's cumulative 300-second budget at its ninth viewport. Both traces had completed all 11 title/port sizes and eight flight/map cases; the next otherwise-valid map click began with fewer seconds remaining than previous successful clicks needed. The 11-size test now has a 480-second total budget; per-action assertions and retries are unchanged. Native simulator failures are separate and must not be mistaken for desktop results. [Compact checked-in evidence](compatibility/browser-evidence.json) retains completed runs, versions, viewports and native driver observations without temporary profiles or workstation paths.
 
 ## Screen sizes and visual review
 

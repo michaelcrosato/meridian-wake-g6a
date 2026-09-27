@@ -67,4 +67,4 @@ Run `npm ci`, `npm test`, `npx playwright install chromium`, `npm run test:e2e`,
 
 The release repository is [michaelcrosato/meridian-wake-g6a](https://github.com/michaelcrosato/meridian-wake-g6a). [GitHub CI](https://github.com/michaelcrosato/meridian-wake-g6a/actions/workflows/ci.yml) runs the checked-in verification workflow against published revisions. The repository contains the application, original audio manifest/attribution, pinned source data, tests, generated evidence, setup instructions and completion report.
 
-The supplied Vercel configuration is import-ready. No Vercel deployment was requested or performed; importing the repository builds and hosts its static `dist` output.
+The supplied Vercel configuration builds and hosts the static `dist` output without backend setup. During this audit, the repository's existing Vercel GitHub integration automatically built a protected preview for [compatibility PR #1](https://github.com/michaelcrosato/meridian-wake-g6a/pull/1). Deployment status and its preview link are recorded in that PR. An unauthenticated HTTP check redirects to Vercel SSO; hosted gameplay was not verified through that authentication gate.

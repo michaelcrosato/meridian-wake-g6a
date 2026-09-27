@@ -361,6 +361,96 @@
           "overlap": 0
         }
       ]
+    },
+    {
+      "id": "linux-chrome-final",
+      "browser": "chrome",
+      "version": "154.0.8037.57",
+      "runtime": {
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "viewport": {
+          "width": 1366,
+          "height": 768,
+          "dpr": 1
+        },
+        "backend": "WebGL2",
+        "audio": {
+          "loaded": 11,
+          "errors": [],
+          "contextState": "running",
+          "muted": true,
+          "volume": 0.35,
+          "gain": 0,
+          "activeVoices": 0,
+          "music": null
+        }
+      },
+      "errors": [],
+      "stats": {
+        "startTime": "2026-09-27T07:01:07.226Z",
+        "duration": 128449.606,
+        "expected": 3,
+        "skipped": 0,
+        "unexpected": 0,
+        "flaky": 0
+      },
+      "viewports": [
+        {
+          "width": 320,
+          "height": 568,
+          "overlap": 0
+        },
+        {
+          "width": 360,
+          "height": 800,
+          "overlap": 0
+        },
+        {
+          "width": 390,
+          "height": 844,
+          "overlap": 0
+        },
+        {
+          "width": 430,
+          "height": 932,
+          "overlap": 0
+        },
+        {
+          "width": 768,
+          "height": 1024,
+          "overlap": 0
+        },
+        {
+          "width": 1024,
+          "height": 768,
+          "overlap": 0
+        },
+        {
+          "width": 1366,
+          "height": 768,
+          "overlap": 0
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "overlap": 0
+        },
+        {
+          "width": 2560,
+          "height": 1080,
+          "overlap": 0
+        },
+        {
+          "width": 844,
+          "height": 390,
+          "overlap": 0
+        },
+        {
+          "width": 683,
+          "height": 384,
+          "overlap": 0
+        }
+      ]
     }
   ],
   "native": [

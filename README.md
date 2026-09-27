@@ -70,7 +70,7 @@ Progress autosaves to this browser's local storage. Options provides JSON save e
 - `WebGPURenderer` from `three/webgpu`, with automatic WebGL2 fallback. Both backends render the same scene and materials.
 - TSL/node PBR materials, procedural HDR environment, faceted geometry, directional shadows, node bloom, and GTAO in High quality. Three r186 calls its node post-processing pipeline `RenderPipeline`.
 - Four-sample antialiasing. High and Balanced change pixel ratio, shadow resolution, AO/bloom, asteroid density, particle counts, and active physics limits.
-- Auto chooses from visible frame time with hysteresis, including very slow frames while excluding hidden-tab gaps. It does not inspect device names or user agents. Diagnostics reports backend, effective preset, frame time, draw calls, geometry and body count.
+- Auto chooses from visible frame time with hysteresis, including very slow frames while excluding hidden-tab gaps. It does not inspect device names or user agents. The diagnostics HUD reports backend, effective preset, frame time and body count; read-only runtime telemetry adds draw calls, geometry and tracked GPU memory.
 - Asteroids use two instanced palette batches while retaining individual colliders and mining behavior. A matched High scene used 181 draw calls instead of 211; this is a measured submission reduction, not a universal frame-rate claim.
 - Rapier runs fixed 1/60-second steps with interpolated positions. The world uses simple spherical colliders, bounded mass, friction and restitution, continuous collision detection, explicit removal, and preset body caps.
 
