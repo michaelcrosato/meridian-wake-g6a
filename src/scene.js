@@ -16,6 +16,8 @@ import {
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
 import { createPhysics, flightSpeed } from "./physics.js";
+import { watchRenderHealth } from "./render-health.js";
+import { createAsteroidField } from "./asteroid-field.js";
 import { describeLandmark, createSpecialLandmarks } from "./landmarks.js";
 import { createMissionActors } from "./mission-actors.js";
 import { createWrecks } from "./wrecks.js";
@@ -276,7 +278,16 @@ export async function createScene(container, options = {}) {
 	renderer.toneMappingExposure = 1.22;
 	renderer.shadowMap.enabled = true;
 	renderer.shadowMap.type = THREE.PCFShadowMap;
-	await renderer.init();
+	const renderHealth = watchRenderHealth(renderer, options.onDeviceLost);
+	try {
+		await renderer.init();
+	} catch (error) {
+		renderHealth.dispose();
+		// Three's dispose() starts an animation-loop init on an uninitialized
+		// renderer. Let this unattached, failed instance be collected instead.
+		throw error;
+	}
+	renderer.info.autoReset = false;
 	container.appendChild(renderer.domElement);
 	renderer.domElement.setAttribute(
 		"aria-label",
@@ -504,6 +515,7 @@ export async function createScene(container, options = {}) {
 		rocks = [],
 		effects = [],
 		pickups = [];
+	const asteroidField = createAsteroidField(world, PRESETS.High.rocks);
 	const aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 	const raycaster = new THREE.Raycaster();
 	const aimPosition = new THREE.Vector3();
@@ -606,7 +618,7 @@ export async function createScene(container, options = {}) {
 
 	function removeRock(rock) {
 		physics.remove(rock.physics);
-		disposeObject(rock.mesh);
+		asteroidField.remove(rock.mesh);
 		rocks.splice(rocks.indexOf(rock), 1);
 	}
 	function populateRocks() {
@@ -628,15 +640,9 @@ export async function createScene(container, options = {}) {
 				damping: 0.01,
 			});
 			if (!entry) break;
-			const mesh = new THREE.Mesh(
-				new THREE.IcosahedronGeometry(size, 0),
-				hullMaterial(rockRng() > 0.75 ? 0x8d8172 : 0x5c6969, 0.96, 0.12),
-			);
+			const mesh = asteroidField.add(size, rockRng() > 0.75);
 			mesh.rotation.set(rockRng() * 6, rockRng() * 6, rockRng() * 6);
-			mesh.scale.set(1.15, 0.8, 0.93);
 			mesh.position.set(position.x, -0.2, position.z);
-			mesh.castShadow = mesh.receiveShadow = true;
-			world.add(mesh);
 			entry.body.setLinvel(
 				{ x: -Math.sin(angle) * 0.25, y: 0, z: Math.cos(angle) * 0.25 },
 				true,
@@ -996,7 +1002,7 @@ export async function createScene(container, options = {}) {
 		entry.body.setLinvel({ x, y: 0, z }, true);
 	}
 	function update(dt, state = {}, input = {}) {
-		if (disposed) return [];
+		if (disposed || !renderHealth.ready) return [];
 		const frameNow = performance.now();
 		const measuredMs = Math.max(
 			1,
@@ -1649,6 +1655,7 @@ export async function createScene(container, options = {}) {
 			rock.mesh.position.set(p.x, -0.2, p.z);
 			rock.mesh.rotation.y += elapsed * 0.03;
 		}
+		asteroidField.sync();
 		for (let i = effects.length - 1; i >= 0; i--) {
 			const effect = effects[i];
 			effect.life -= elapsed;
@@ -1722,6 +1729,7 @@ export async function createScene(container, options = {}) {
 		key.target.position.copy(ship.position);
 		jumpFlash = Math.max(0, jumpFlash - elapsed * 1.2);
 		renderer.toneMappingExposure = 1.22 + jumpFlash * 0.35;
+		renderer.info.reset();
 		pipeline.render();
 		return events;
 	}
@@ -1803,7 +1811,17 @@ export async function createScene(container, options = {}) {
 				shipId: enemy.mesh.userData.shipId,
 			})),
 			pickups: pickups.length,
-			backendReady: true,
+			backendReady: renderHealth.ready,
+			deviceLost: renderHealth.loss,
+			rendering: {
+				requestedSamples: renderer.samples,
+				sceneSamples: scenePass.renderTarget.samples,
+				drawCalls: renderer.info.render.drawCalls,
+				triangles: renderer.info.render.triangles,
+				geometries: renderer.info.memory.geometries,
+				textures: renderer.info.memory.textures,
+				trackedGpuBytes: renderer.info.memory.total,
+			},
 			system: currentSystem.id,
 			landmark: describeLandmark(currentSystem).kind,
 			destination: describeLandmark(currentSystem).name,
@@ -1813,6 +1831,7 @@ export async function createScene(container, options = {}) {
 	function dispose() {
 		if (disposed) return;
 		disposed = true;
+		renderHealth.dispose();
 		resizeObserver.disconnect();
 		missionActors.clear();
 		wrecks.clear();

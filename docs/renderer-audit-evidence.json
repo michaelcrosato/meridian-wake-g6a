@@ -1,0 +1,119 @@
+{
+  "date": "2026-09-27",
+  "baselineRevision": "de17cab37cb623e2d87b4d7904a3ed1327dd6bf0",
+  "scope": "Renderer compatibility, bounded visual batching, and graphics-device-loss handling. This is not a full campaign, physical-phone or sustained thermal benchmark.",
+  "comparison": {
+    "fixture": "Same procedural title scene; 1440×900 DPR 1; High; 28 asteroids and 1 player; five deterministic 1/60-second presentation updates; no simulation movement. The final measured render was scheduled in requestAnimationFrame.",
+    "webgl2": {
+      "adapter": "ANGLE / Mesa D3D12 / NVIDIA RTX4070SUPER;headed private Xvfb",
+      "before": {
+        "backend": "WebGL2",
+        "drawCalls": 211,
+        "triangles": 39546,
+        "geometries": 109,
+        "trackedGpuBytes": 61635182,
+        "bodies": 29
+      },
+      "after": {
+        "backend": "WebGL2",
+        "drawCalls": 181,
+        "triangles": 40506,
+        "geometries": 92,
+        "trackedGpuBytes": 61626172,
+        "bodies": 29
+      },
+      "normalizedImageMeanAbsoluteDifference": 1.00863e-9,
+      "screenshots": [
+        {
+          "path": ".cache/rocks-before-webgl.png",
+          "sha256": "9cda5575d0977682d8609b7b7e04c3589556663cee50dd90ae89c3a224f7c5c3"
+        },
+        {
+          "path": ".cache/rocks-after-webgl.png",
+          "sha256": "6b9c4335ee60323fea1f165acec04b45022c8c85463d636441f4c9ea5f3bffe4"
+        }
+      ]
+    },
+    "webgpu": {
+      "adapter": "Google SwiftShader software Vulkan;headed private Xvfb",
+      "before": {
+        "backend": "WebGPU",
+        "drawCalls": 211,
+        "triangles": 39546,
+        "geometries": 109,
+        "trackedGpuBytes": 61678765,
+        "bodies": 29
+      },
+      "after": {
+        "backend": "WebGPU",
+        "drawCalls": 181,
+        "triangles": 40506,
+        "geometries": 92,
+        "trackedGpuBytes": 61675438,
+        "bodies": 29
+      },
+      "normalizedImageMeanAbsoluteDifference": 0,
+      "screenshots": [
+        {
+          "path": ".cache/rocks-before-webgpu.png",
+          "sha256": "d5c225f1a3305e16c72a45f1882c24d7016792d57584a70f85efcfc2e28fb1d1"
+        },
+        {
+          "path": ".cache/rocks-after-webgpu.png",
+          "sha256": "d5c225f1a3305e16c72a45f1882c24d7016792d57584a70f85efcfc2e28fb1d1"
+        }
+      ]
+    },
+    "interpretation": "211→181 draw calls (-14.2%) on both backends. Two instanced palette batches preserve the individual transforms and shapes. Submitted triangles rise39546→40506 (+2.4%) because inexpensive20-face asteroids are no longer individually frustum-culled. Tracked GPU bytes fall slightly. No FPS-speedup claim: timing on the shared host varied with concurrent work."
+  },
+  "mining": {
+    "fixture": "Renderer-only synthetic primary damage100, automatic aim at one existing asteroid; no rules-model reward/energy claims.",
+    "updates": 59,
+    "bodiesBefore": 29,
+    "bodiesAfter": 28,
+    "minedEvents": 1,
+    "remainingInstances": 27,
+    "pageErrors": []
+  },
+  "collisions": {
+    "test": "tests/asteroid-field.test.js / batched rocks keep independent Rapier collisions and mining removal",
+    "assertions": [
+      "Player transfers momentum to the struck asteroid and slows down.",
+      "An untouched asteroid keeps its independent collider and position.",
+      "Mining removes only the struck collider and its visual instance; the other remains."
+    ]
+  },
+  "deviceLoss": {
+    "trigger": "WEBGL_lose_context.loseContext() in the actual initialized renderer",
+    "extraUpdatesAfterLoss": 60,
+    "positionBefore": {
+      "x": 11.861377716064451,
+      "z": 14.16445541381836
+    },
+    "positionAfter": {
+      "x": 11.861377716064451,
+      "z": 14.16445541381836
+    },
+    "backendReady": false,
+    "callbackCount": 1,
+    "loss": {
+      "api": "WebGL",
+      "message": "Unknown reason",
+      "reason": null
+    },
+    "pageErrors": [],
+    "contract": "createScene options.onDeviceLost({api,message,reason}) runs once after Three marks the backend lost. update() then returns no events and performs no physics/rendering. getTelemetry().backendReady=false and deviceLost contains the report. dispose() suppresses callbacks caused by intentional destruction. The UI must pause rules-model time, save, and provide recovery."
+  },
+  "rejectedOptimization": "Disabling presentation MSAA was not retained: the original actual WebGL canvas already had antialias=false through Three’s output handling. Scene-pass4×MSAA remains unchanged.",
+  "validation": {
+    "rendererTests": 25,
+    "rendererTestsPassed": 25,
+    "productionBuild": "passed; existing large-chunk advisory remains",
+    "pageErrors": 0
+  },
+  "remainingLimits": [
+    "Firefox and WebKit integration belong to the parent compatibility matrix.",
+    "No physical-phone or hardware-WebGPU performance measurement.",
+    "Screenshots and raw probes are local .cache artifacts; their hashes identify the inspected evidence."
+  ]
+}
