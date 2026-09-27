@@ -133,6 +133,7 @@ export async function main(argv = process.argv.slice(2)) {
 			"device-udid": { type: "string" },
 			"runtime-version": { type: "string" },
 			"reuse-device": { type: "boolean", default: false },
+			"host-preflight": { type: "boolean", default: false },
 			artifacts: { type: "string", default: "artifacts/mobile-safari" },
 			url: { type: "string" },
 			"preview-port": { type: "string", default: "4176" },
@@ -149,6 +150,8 @@ export async function main(argv = process.argv.slice(2)) {
   --runtime-version X.Y  Select that installed iOS runtime explicitly.
   --reuse-device         Reuse the selected preinstalled device instead of
                          creating an isolated temporary device of its type.
+  --host-preflight        Optionally test a separate macOS Safari session;
+                         this is not required for an iOS-only audit.
   --url URL              Use an existing preview; otherwise start built dist/.
   --artifacts DIRECTORY  Default: artifacts/mobile-safari.
   --self-test            Check discovery logic on any OS; does not run Safari.
@@ -512,8 +515,8 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 				console.log(
 					`Auditing ${device.name} / iOS ${device.version} / ${device.udid}`,
 				);
-				// Verify the server and host automation before CoreSimulator startup can
-				// consume resources. This is infrastructure evidence, not an iOS result.
+				// Check the server before boot consumes resources. A desktop Safari
+				// session is optional: it is a different target from MobileSafari.
 				await phase("host-driver-health");
 				driver = processWithLog(
 					"/usr/bin/safaridriver",
@@ -529,24 +532,32 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 					const health = await command("/status", "GET", undefined, 10000);
 					return health.ready === false ? false : health;
 				}, "recorded safaridriver health");
-				await phase("host-remote-automation-preflight");
-				const hostSession = await command(
-					"/session",
-					"POST",
-					{
-						capabilities: {
-							alwaysMatch: { browserName: "Safari", platformName: "macOS" },
+				if (values["host-preflight"]) {
+					await phase("host-remote-automation-preflight");
+					const hostSession = await command(
+						"/session",
+						"POST",
+						{
+							capabilities: {
+								alwaysMatch: { browserName: "Safari", platformName: "macOS" },
+							},
 						},
-					},
-					60000,
-				);
-				session = hostSession.sessionId;
-				evidence.hostAutomation = {
-					capabilities: hostSession.capabilities,
-					status: "session-accepted",
-				};
-				await command("", "DELETE", undefined, 10000);
-				session = undefined;
+						60000,
+					);
+					session = hostSession.sessionId;
+					evidence.hostAutomation = {
+						capabilities: hostSession.capabilities,
+						status: "session-accepted",
+					};
+					await command("", "DELETE", undefined, 10000);
+					session = undefined;
+				} else {
+					evidence.hostAutomation = {
+						status: "not-requested",
+						boundary:
+							"Workflow must enable safaridriver; permission is established by the required native iOS session itself",
+					};
+				}
 				if (!values["reuse-device"] && !values["device-udid"]) {
 					await phase("create-isolated-simulator");
 					assert(
