@@ -62,6 +62,10 @@ let selectedWreckId = null;
 let approachWreckId = null;
 let encounterKey = "";
 let lastSave = 0;
+let lastSaveAttempt = 0;
+let saveUnavailable = false;
+let preferencesUnavailable = false;
+let graphicsFault = null;
 let lastHud = 0;
 let modelTimeAccumulator = 0;
 const resumePanel = null;
@@ -114,19 +118,42 @@ const starmapPosition = (s) => {
 function persistSettings() {
 	try {
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-	} catch {}
+		preferencesUnavailable = false;
+	} catch {
+		if (!preferencesUnavailable)
+			toast(
+				"Preferences apply to this tab; browser storage is unavailable.",
+				"error",
+			);
+		preferencesUnavailable = true;
+	}
 }
 function save() {
 	if (title) return;
+	lastSaveAttempt = performance.now();
 	try {
 		localStorage.setItem(SAVE_KEY, game.save());
 		lastSave = performance.now();
+		saveUnavailable = false;
 	} catch {
-		toast(
-			"Local storage is unavailable. Export your save from Options.",
-			"error",
-		);
+		if (!saveUnavailable)
+			toast(
+				"Local storage is unavailable. Export your save from Options.",
+				"error",
+			);
+		saveUnavailable = true;
 	}
+}
+function graphicsInterrupted(details) {
+	if (graphicsFault) return;
+	graphicsFault = details;
+	clearControls();
+	autopilot = false;
+	approachActorId = null;
+	approachWreckId = null;
+	save();
+	panelHistory.length = 0;
+	setPanel("graphicsFault");
 }
 function hasSave() {
 	try {
@@ -165,6 +192,7 @@ function setPanel(next) {
 	render({ focusFirst: true });
 }
 function closePanel() {
+	if (panel === "graphicsFault") return;
 	if (bindingCapture) {
 		bindingCapture = null;
 		render();
@@ -375,8 +403,15 @@ function hud() {
 function meter(label, id, value, max) {
 	return `<div class="bar-row ${id}"><span>${label}</span><div class="meter"><i id="${id}-bar" style="width:${Math.min(100, Math.max(0, (100 * value) / (max || 1)))}%"></i></div><span id="${id}-value">${id === "fuel" ? Math.floor(value) : Math.ceil(value)}</span></div>`;
 }
-function modal(titleText, subtitle, body, footer = "", small = false) {
-	return `<div class="modal-backdrop"><section class="modal ${small ? "small-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div><div class="eyebrow">${subtitle}</div><h2 id="modal-title">${titleText}</h2></div><button class="close-button" data-action="close" aria-label="Close panel">${icon("close")}</button></header><div class="modal-body">${body}</div>${footer ? `<footer class="modal-footer">${footer}</footer>` : ""}</section></div>`;
+function modal(
+	titleText,
+	subtitle,
+	body,
+	footer = "",
+	small = false,
+	dismissible = true,
+) {
+	return `<div class="modal-backdrop"><section class="modal ${small ? "small-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div><div class="eyebrow">${subtitle}</div><h2 id="modal-title">${titleText}</h2></div>${dismissible ? `<button class="close-button" data-action="close" aria-label="Close panel">${icon("close")}</button>` : ""}</header><div class="modal-body">${body}</div>${footer ? `<footer class="modal-footer">${footer}</footer>` : ""}</section></div>`;
 }
 function render({ focusFirst = false, returnFocus = false } = {}) {
 	const previousFocus = focusToken(document.activeElement);
@@ -408,6 +443,15 @@ function render({ focusFirst = false, returnFocus = false } = {}) {
 }
 function renderPanel() {
 	switch (panel) {
+		case "graphicsFault":
+			return modal(
+				"Graphics paused",
+				"Your flight is paused",
+				`<p>The browser interrupted the graphics connection.</p><p>${title ? "Reload to restart graphics." : saveUnavailable ? "Export a backup before reloading; this browser could not save your voyage locally." : "Your voyage is saved. Reload, then continue your voyage."}</p><div class="button-row"><button class="primary" data-action="reloadGraphics">Reload graphics</button><button data-action="options">Options</button>${!title ? '<button data-action="exportSave">Export save</button>' : ""}</div>`,
+				"<span>If this repeats, choose Balanced quality in Options.</span>",
+				true,
+				false,
+			);
 		case "new":
 			return renderNew();
 		case "port":
@@ -1017,7 +1061,7 @@ function renderOptions() {
 			.join(
 				"",
 			)}</select></div><div class="settings-row"><div><strong>Keyboard controls</strong><p>Change primary and alternate bindings for any keyboard layout.</p></div><button data-action="bindings">Change controls</button></div><div class="settings-row"><div><strong>Controller</strong><p>${gamepadName ? esc(gamepadName) : "Standard gamepads are detected when you press a controller button."}</p></div><button data-action="controls">Controller guide</button></div><div class="settings-row"><div><strong>Fullscreen</strong><p>${fullscreenAvailable() || document.fullscreenElement ? "A little more room for the universe." : "This browser does not allow page fullscreen. Use its display options if available."}</p></div><button data-action="fullscreen" ${!fullscreenAvailable() && !document.fullscreenElement ? "disabled" : ""}>${document.fullscreenElement ? "Exit" : fullscreenAvailable() ? "Enter" : "Unavailable"} ${icon("full")}</button></div><div class="settings-row"><div><strong>Flight diagnostics</strong><p>Show renderer backend, active preset, and frame time.</p></div><button data-action="toggleDiagnostics">${settings.diagnostics ? "Visible" : "Hidden"}</button></div>${!title ? '<div class="settings-row"><div><strong>Your captain’s record</strong><p>Saved automatically on this browser. Export a backup to carry your progress elsewhere.</p></div><button data-action="exportSave">Export save</button></div>' : ""}<div class="settings-row"><div><strong>Import a voyage</strong><p>Restore a previously exported Meridian Wake save.</p></div><button data-action="importSave">Import save</button><input id="save-file" type="file" accept="application/json,.json" hidden></div><div class="button-row">${!title ? '<button data-action="title">Save & return to title</button>' : ""}<button data-action="controls">Flight handbook</button><button data-action="about">About this voyage</button></div>`,
-		"<span>Preferences save automatically.</span>",
+		`<span>${preferencesUnavailable ? "Preferences apply to this tab; storage is unavailable." : "Preferences save automatically."}</span>`,
 		true,
 	);
 }
@@ -1150,6 +1194,11 @@ async function loadCatalog() {
 }
 async function handleAction(action, el) {
 	const id = el?.dataset?.id;
+	if (action === "reloadGraphics") {
+		save();
+		location.reload();
+		return;
+	}
 	if (
 		["controls", "bindings"].includes(action) &&
 		!keyboardLayout &&
@@ -1564,7 +1613,7 @@ app.addEventListener("change", async (event) => {
 	}
 	if (el.id === "quality-setting") {
 		settings.quality = el.value;
-		scene?.setQuality(settings.quality);
+		if (!graphicsFault) scene?.setQuality(settings.quality);
 		persistSettings();
 	}
 	if (el.id === "system-search") {
@@ -2086,8 +2135,11 @@ function updateHud(t) {
 			tele.enemies > 0 ? `${tele.enemies} HOSTILE CONTACTS` : "LOCAL SCANNER";
 	const saveStatus = $("#save-status");
 	if (saveStatus)
-		saveStatus.textContent =
-			t - lastSave < 2500 ? "VOYAGE SAVED" : "AUTOSAVE ON";
+		saveStatus.textContent = saveUnavailable
+			? "EXPORT BACKUP"
+			: t - lastSave < 2500
+				? "VOYAGE SAVED"
+				: "AUTOSAVE ON";
 }
 let lastFrame = performance.now();
 function frame(now) {
@@ -2096,6 +2148,7 @@ function frame(now) {
 	if (scene) {
 		pollGamepad(now, dt);
 		const paused =
+			!!graphicsFault ||
 			title ||
 			!!panel ||
 			state().mode !== "flight" ||
@@ -2232,7 +2285,7 @@ function frame(now) {
 			updateHud(now);
 			lastHud = now;
 		}
-		if (!title && now - lastSave > 20000) save();
+		if (!title && now - lastSaveAttempt > 20000) save();
 	}
 	if (toasts.some((t) => t.until < now)) {
 		while (toasts[0]?.until < now) toasts.shift();
@@ -2246,6 +2299,7 @@ try {
 	scene = await createScene(document.querySelector("#scene"), {
 		quality: settings.quality,
 		authorizeAction: (action) => game.act(action),
+		onDeviceLost: graphicsInterrupted,
 	});
 	scene.setQuality(settings.quality);
 	scene.setView("title");
