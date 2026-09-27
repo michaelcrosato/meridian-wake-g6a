@@ -8,3 +8,8 @@ tests/
 playwright*.js
 scripts/audit-*.mjs
 .github/
+.claude/
+AGENTS.md
+CLAUDE.md
+scripts/ship.sh
+scripts/repo-status.sh
