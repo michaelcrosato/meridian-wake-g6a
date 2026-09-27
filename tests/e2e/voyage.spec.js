@@ -471,11 +471,60 @@ test("six protected source ships survive the final convoy jump and physically ar
 		.locator(".actor-marker")
 		.filter({ hasText: "F.S. Franklin" });
 	await expect(contact).toBeVisible();
-	const rect = await contact.boundingBox();
-	await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
-	await page.mouse.down();
-	await page.waitForTimeout(300); // Deliberate held click across a HUD refresh.
-	await page.mouse.up();
+	await contact.evaluate((element) => {
+		const audit = {
+			trustedDown: false,
+			captureAcquired: false,
+			capturedUp: false,
+			hudMutations: 0,
+			releasedOnSameNode: false,
+		};
+		window.heldContactAudit = audit;
+		const observer = new MutationObserver((records) => {
+			audit.hudMutations += records.length;
+		});
+		element.addEventListener(
+			"pointerdown",
+			(event) => {
+				audit.trustedDown =
+					event.isTrusted && event.target.closest(".actor-marker") === element;
+				observer.observe(element, {
+					attributes: true,
+					attributeFilter: ["class", "style"],
+				});
+			},
+			{ once: true },
+		);
+		element.addEventListener(
+			"gotpointercapture",
+			(event) => {
+				audit.captureAcquired =
+					event.isTrusted && element.hasPointerCapture(event.pointerId);
+			},
+			{ once: true },
+		);
+		element.addEventListener(
+			"pointerup",
+			(event) => {
+				audit.hudMutations += observer.takeRecords().length;
+				observer.disconnect();
+				audit.capturedUp = element.hasPointerCapture(event.pointerId);
+				audit.releasedOnSameNode =
+					element.isConnected &&
+					event.target.closest(".actor-marker") === element;
+			},
+			{ once: true },
+		);
+	});
+	// Let the locator hit-test the moving contact at press time, rather than
+	// reusing a bounding box across several slow automation round trips.
+	await contact.click({ delay: 300 });
+	const heldClick = await page.evaluate(() => window.heldContactAudit);
+	expect(heldClick.trustedDown).toBe(true);
+	expect(heldClick.captureAcquired).toBe(true);
+	expect(heldClick.capturedUp).toBe(true);
+	expect(heldClick.releasedOnSameNode).toBe(true);
+	expect(heldClick.hudMutations).toBeGreaterThan(0);
 	await expect(contact).toHaveClass(/selected/);
 	await page.keyboard.press("m");
 	await page.locator("#system-search").fill("Tarazed");
