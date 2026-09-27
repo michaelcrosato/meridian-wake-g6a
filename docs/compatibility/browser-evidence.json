@@ -184,6 +184,8 @@
     },
     {
       "id": "windows-chrome",
+      "revision": "1557c39ad0e42ea534bdcdee9257734d317ac181",
+      "workflow": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36302196665",
       "browser": "chrome",
       "version": "153.0.8010.53",
       "runtime": {
@@ -207,8 +209,8 @@
       },
       "errors": [],
       "stats": {
-        "startTime": "2026-09-27T06:04:35.473Z",
-        "duration": 298026.10000000003,
+        "startTime": "2026-09-27T07:09:29.206Z",
+        "duration": 501078.36000000004,
         "expected": 3,
         "skipped": 0,
         "unexpected": 0,
@@ -274,6 +276,8 @@
     },
     {
       "id": "windows-edge",
+      "revision": "1557c39ad0e42ea534bdcdee9257734d317ac181",
+      "workflow": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36302196665",
       "browser": "edge",
       "version": "153.0.4234.48",
       "runtime": {
@@ -297,8 +301,8 @@
       },
       "errors": [],
       "stats": {
-        "startTime": "2026-09-27T06:04:23.333Z",
-        "duration": 360333.502,
+        "startTime": "2026-09-27T07:09:25.416Z",
+        "duration": 501313.777,
         "expected": 3,
         "skipped": 0,
         "unexpected": 0,
@@ -633,10 +637,12 @@
     },
     {
       "id": "macos-safari",
+      "revision": "1557c39ad0e42ea534bdcdee9257734d317ac181",
+      "workflow": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36302196665",
       "browser": "Apple Safari",
-      "startedAt": "2026-09-27T05:07:37.050Z",
+      "startedAt": "2026-09-27T07:09:15.145Z",
       "checks": [
-        "Title renders at four actual Safari window sizes without horizontal overflow",
+        "Title renders at four actual browser window sizes without horizontal overflow",
         "Keyboard flight, arrows, primary fire, map search, jump, assisted dock and actual mission completion",
         "All eleven audio files decode and AudioContext resumes through actual input",
         "Local save survives page reload and Continue"
@@ -698,13 +704,14 @@
           },
           "backend": "WebGL2",
           "secondaryProjectiles": 0,
+          "deviceLost": null,
           "dockDistance": 13,
           "speed": 0,
           "intercepted": 0,
           "preset": "Balanced",
           "activeEnemies": 0,
           "maxBodies": 42,
-          "frameMs": 64.0947878375,
+          "frameMs": 118.9085,
           "wrecks": [],
           "missionActors": [],
           "queuedEnemies": 0,
@@ -714,6 +721,15 @@
           "backendReady": true,
           "targets": [],
           "enemies": 0,
+          "rendering": {
+            "textures": 6,
+            "requestedSamples": 4,
+            "drawCalls": 104,
+            "triangles": 22685,
+            "geometries": 83,
+            "sceneSamples": 4,
+            "trackedGpuBytes": 26714295
+          },
           "system": "rutilicus",
           "destination": "New Boston",
           "bodies": 17,
@@ -731,11 +747,12 @@
         "errors": [],
         "volume": 0.4,
         "muted": false,
-        "gain": 0.3655686378479004,
+        "gain": 0.35258373618125916,
         "activeVoices": 1,
         "music": "port",
         "contextState": "running"
       },
+      "errorsBeforeReload": [],
       "final": {
         "state": {
           "mode": "port",
@@ -751,13 +768,14 @@
           },
           "backend": "WebGL2",
           "secondaryProjectiles": 0,
+          "deviceLost": null,
           "dockDistance": 13,
           "speed": 0,
           "intercepted": 0,
           "preset": "Balanced",
           "activeEnemies": 0,
           "maxBodies": 42,
-          "frameMs": 82.77948784745654,
+          "frameMs": 83.53319177840845,
           "wrecks": [],
           "missionActors": [],
           "queuedEnemies": 0,
@@ -767,6 +785,15 @@
           "backendReady": true,
           "targets": [],
           "enemies": 0,
+          "rendering": {
+            "textures": 6,
+            "requestedSamples": 4,
+            "drawCalls": 107,
+            "triangles": 20469,
+            "geometries": 91,
+            "sceneSamples": 4,
+            "trackedGpuBytes": 26872568
+          },
           "system": "arcturus",
           "destination": "New Greenland",
           "bodies": 17,
@@ -780,7 +807,7 @@
         }
       },
       "status": "passed",
-      "finishedAt": "2026-09-27T05:08:33.411Z"
+      "finishedAt": "2026-09-27T07:09:48.420Z"
     }
   ]
 }
