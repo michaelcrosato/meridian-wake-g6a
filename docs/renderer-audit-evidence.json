@@ -115,5 +115,42 @@
     "Firefox and WebKit integration belong to the parent compatibility matrix.",
     "No physical-phone or hardware-WebGPU performance measurement.",
     "Screenshots and raw probes are local .cache artifacts; their hashes identify the inspected evidence."
-  ]
+  ],
+  "autoQuality": {
+    "change": "Warmup, observation windows and cooldown use visible wall time. Slow foreground frames have no rejection threshold. Visibility and intentional pause/view transitions reset the measurement baseline; visible paused menus continue sampling.",
+    "thresholds": {
+      "warmupMs": 3000,
+      "windowMs": 4000,
+      "minimumSamples": 8,
+      "cooldownMs": 12000,
+      "downgradeP75Ms": 23,
+      "upgradeP75Ms": 13
+    },
+    "regressions": [
+      "500ms foreground frames select Balanced after7seconds.",
+      "A10minute background gap produces no frame-time sample or quality bias.",
+      "A12second visible cooldown and existing percentile hysteresis remain.",
+      "Manual High and Balanced never change under slow-frame input.",
+      "The120Hz fixed-physics regression still passes."
+    ],
+    "nativeCheck": {
+      "browser": "Official Chromium156.0.8076.0 AndroidDesktop_x64 diagnostic on owned Android16 emulator",
+      "backend": "WebGL2 / ANGLE Vulkan / Mesa llvmpipe; WebGPU disabled",
+      "scope": "Actual Android current Chromium156 ANGLE Vulkan, patched Auto sampler only, title visible; not physical-phone FPS evidence",
+      "first": {
+        "elapsedMs": 730,
+        "effective": "High",
+        "frameMs": 88.58957609368706,
+        "bodies": 29
+      },
+      "last": {
+        "elapsedMs": 7302,
+        "effective": "Balanced",
+        "frameMs": 63.25151481272517,
+        "bodies": 17
+      },
+      "pageErrors": []
+    },
+    "limits": "Android software/emulator timing is not physical-phone performance. The discarded GLES-driver shader workarounds are not part of this change."
+  }
 }

@@ -18,6 +18,7 @@ import { ao } from "three/addons/tsl/display/GTAONode.js";
 import { createPhysics, flightSpeed } from "./physics.js";
 import { watchRenderHealth } from "./render-health.js";
 import { createAsteroidField } from "./asteroid-field.js";
+import { createQualitySampler } from "./quality.js";
 import { describeLandmark, createSpecialLandmarks } from "./landmarks.js";
 import { createMissionActors } from "./mission-actors.js";
 import { createWrecks } from "./wrecks.js";
@@ -480,10 +481,10 @@ export async function createScene(container, options = {}) {
 		fireTimer = 0,
 		impactTimer = 0,
 		shipId = options.ship?.id || "sparrow";
-	let frameMs = 16.7,
-		sampleTime = 0,
-		samples = [],
-		autoCooldown = 0;
+	let frameMs = 16.7;
+	const qualitySampler = createQualitySampler();
+	const suspendMeasurement = () => qualitySampler.suspend();
+	document.addEventListener("visibilitychange", suspendMeasurement);
 	let landReady = false,
 		disposed = false,
 		jumpFlash = 0;
@@ -507,7 +508,7 @@ export async function createScene(container, options = {}) {
 		secondaryCount = 0,
 		interceptCount = 0;
 	let qualityConfigured = false;
-	let lastMeasuredFrame = performance.now();
+	let presetConfigured = false;
 	const cameraTarget = new THREE.Vector3(-10, 0, 0);
 	const projectiles = [],
 		enemies = [],
@@ -651,7 +652,8 @@ export async function createScene(container, options = {}) {
 		}
 	}
 	function applyPreset(name) {
-		if (effective === name && samples.length) return;
+		if (presetConfigured && effective === name) return;
+		presetConfigured = true;
 		effective = name;
 		const settings = PRESETS[name];
 		physics.setLimit(settings.bodies);
@@ -673,9 +675,7 @@ export async function createScene(container, options = {}) {
 		if (qualityConfigured && quality === next) return;
 		qualityConfigured = true;
 		quality = next;
-		samples = [];
-		sampleTime = 0;
-		autoCooldown = 0;
+		qualitySampler.reset();
 		applyPreset(quality === "Auto" ? "High" : quality);
 	}
 
@@ -1003,16 +1003,19 @@ export async function createScene(container, options = {}) {
 	}
 	function update(dt, state = {}, input = {}) {
 		if (disposed || !renderHealth.ready) return [];
-		const frameNow = performance.now();
-		const measuredMs = Math.max(
-			1,
-			Math.min(1000, frameNow - lastMeasuredFrame),
-		);
-		lastMeasuredFrame = frameNow;
 		if (document.hidden) {
 			physics.resetClock();
+			qualitySampler.suspend();
 			return [];
 		}
+		const measurement = qualitySampler.observe(
+			performance.now(),
+			quality,
+			effective,
+		);
+		if (measurement.frameMs !== null)
+			frameMs += (measurement.frameMs - frameMs) * 0.045;
+		if (measurement.preset) applyPreset(measurement.preset);
 		if (Array.isArray(state.escorts))
 			setFleet(state.escorts, state.fleetCommand);
 		if (Array.isArray(state.missionActors))
@@ -1053,21 +1056,6 @@ export async function createScene(container, options = {}) {
 		const events = [];
 		const elapsed = Math.min(dt || 1 / 60, 0.1);
 		time += elapsed;
-		frameMs += (measuredMs - frameMs) * 0.045;
-		autoCooldown -= elapsed;
-		if (quality === "Auto" && autoCooldown <= 0 && measuredMs < 500) {
-			sampleTime += measuredMs / 1000;
-			if (time > 3) samples.push(measuredMs);
-			if (sampleTime > 4 && samples.length > 24) {
-				const sorted = [...samples].sort((a, b) => a - b);
-				const p75 = sorted[Math.floor(sorted.length * 0.75)];
-				if (effective === "High" && p75 > 23) applyPreset("Balanced");
-				else if (effective === "Balanced" && p75 < 13) applyPreset("High");
-				autoCooldown = 12;
-				sampleTime = 0;
-				samples = [];
-			}
-		}
 		if (state.ship) currentStats = { ...currentStats, ...state.ship };
 		const cloaked =
 			!!(state.cloaked ?? currentStats.cloaked) && view === "flight";
@@ -1736,6 +1724,7 @@ export async function createScene(container, options = {}) {
 	function setView(next) {
 		if (view === next) return;
 		view = next;
+		qualitySampler.suspend();
 		physics.resetClock();
 		resize();
 	}
@@ -1832,6 +1821,7 @@ export async function createScene(container, options = {}) {
 		if (disposed) return;
 		disposed = true;
 		renderHealth.dispose();
+		document.removeEventListener("visibilitychange", suspendMeasurement);
 		resizeObserver.disconnect();
 		missionActors.clear();
 		wrecks.clear();
@@ -1874,7 +1864,9 @@ export async function createScene(container, options = {}) {
 		setShip,
 		setQuality,
 		setPaused(value) {
-			paused = Boolean(value);
+			const next = Boolean(value);
+			if (next !== paused) qualitySampler.suspend();
+			paused = next;
 			physics.setPaused(paused);
 		},
 		setCombat,
