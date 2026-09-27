@@ -4,6 +4,8 @@ Vite and vanilla JavaScript; no runtime backend. `src/main.js` owns the interfac
 
 ## Routine checks
 
+Every task ends reviewed, merged and clean: see [AGENTS.md](../AGENTS.md). `scripts/ship.sh` delivers finished work through a pull request, and `scripts/repo-status.sh` reports anything left behind.
+
 - `npm test`: game, campaign, source interpreter, physics, rendering helpers, controls, banking/storage and audio-loading tests.
 - `npm run test:e2e`: production build and real Chromium UI journeys, including native contacts, convoy arrival, cloak use, audio, save/recovery, controls and mobile layout.
 - `npm run verify:source`: imported declaration/provenance checks, audio checksums and decoding; needs `ffprobe`.
