@@ -1,0 +1,133 @@
+{
+  "observedDate": "2026-09-26",
+  "timezone": "America/Vancouver",
+  "environment": {
+    "os": "Android16",
+    "apiLevel": 36,
+    "architecture": "x86_64",
+    "device": "Owned medium_phone AVD; not physical hardware",
+    "browserVersion": "156.0.8076.0",
+    "package": "org.chromium.chrome",
+    "variant": "Official AndroidDesktop_x64 snapshot; current mobile Blink diagnostic, not stable branded Chrome Mobile",
+    "backend": "WebGL2 over ANGLE Vulkan/Mesa llvmpipe LLVM21; WebGPU disabled",
+    "quality": "Balanced",
+    "input": "Trusted Chromium CDP Input.dispatchTouchEvent events in the actual Android browser",
+    "viewportCssPixels": {
+      "width": 411,
+      "height": 750,
+      "devicePixelRatio": 2.625
+    }
+  },
+  "browserSource": {
+    "documentation": "https://www.chromium.org/getting-involved/download-chromium/",
+    "archiveURL": "https://storage.googleapis.com/chromium-browser-snapshots/AndroidDesktop_x64/1705635/chrome-android-desktop.zip",
+    "revision": "1705635",
+    "chromiumRevision": "1d9bb5a99143c9d5ab3d43ce38e00b2c8b213937",
+    "archiveSha256": "740888c212ea65810702b50c037f2c43c9dbb8b84d0bf4266b747cd937af6cd2",
+    "archiveMd5": "fffd827ee07789d527d97d91f5545b78",
+    "googleBucketMd5Base64": "//2CfuB3idUn2X2R9VRbeA==",
+    "apkSha256": "73e9ecf177f4406e917bd24b7786db053037f8a396cc9154cb3f4d562fbddf82",
+    "flags": "_ --disable-features=WebGPU --enable-features=Vulkan --use-angle=vulkan --disable-fre --no-first-run --enable-automation --remote-debugging-port=9222"
+  },
+  "production": {
+    "entryAssetAtDiagnostic": "index-DRfsHR4U.js",
+    "renderer": "Unmodified production renderer; experimental GLES workarounds were discarded"
+  },
+  "checks": {
+    "simultaneousFlight": {
+      "positionBefore": {
+        "x": 12,
+        "z": 14
+      },
+      "positionDuring": {
+        "x": 10.598,
+        "z": 12.782
+      },
+      "speedDuring": 5.428,
+      "headingBefore": -0.28,
+      "headingDuring": -1.927,
+      "powerRange": [
+        96.88,
+        100
+      ],
+      "peakHeat": 3.3,
+      "heldControls": 3,
+      "heldAfterRelease": 0
+    },
+    "navigation": {
+      "selection": "Trusted touch on Arcturus SVG chart node; no native keyboard/search typing",
+      "system": "arcturus",
+      "modeAfterJump": "flight",
+      "modeAfterAutodock": "port",
+      "planetAfterAutodock": "New Greenland"
+    },
+    "multiTouch": {
+      "fixture": "tests/fixtures/earned-epilogue.json",
+      "fixtureBoundary": "Earned model checkpoint imported through UI; not earned during this Android session",
+      "cloakedAfterSecondFingerTap": true,
+      "thrustStillHeld": true,
+      "sameThrustDomNode": true,
+      "dragAwayDidNotToggle": true,
+      "heldAfterAllReleased": 0,
+      "heldAfterOpeningMap": 0
+    },
+    "pageErrors": []
+  },
+  "separateAutoCheck": {
+    "scope": "Actual Android current Chromium156 ANGLE Vulkan, patched Auto sampler only, title visible; not physical-phone FPS evidence",
+    "change": "Visible-wall-time Auto sampler; merged as e418570",
+    "initial": {
+      "elapsedMs": 730,
+      "effective": "High",
+      "frameMs": 88.58957609368706,
+      "bodies": 29
+    },
+    "final": {
+      "elapsedMs": 7302,
+      "effective": "Balanced",
+      "frameMs": 63.25151481272517,
+      "bodies": 17
+    },
+    "pageErrors": []
+  },
+  "failures": [
+    {
+      "browser": "SDK Chrome133.0.6943.137",
+      "path": "Emulator GLES translation, including legacy SwiftShader and configured swangle/host backends",
+      "result": "Black or corrupted scene; a minimal lit PBR cube also failed"
+    },
+    {
+      "browser": "Chromium156.0.8076.0 snapshot",
+      "path": "ANGLE over emulator GLES/D3D12",
+      "result": "Original scene and minimal PBR probe failed visually"
+    },
+    {
+      "browser": "SDK Chrome133.0.6943.137",
+      "path": "ANGLE Vulkan flags",
+      "result": "WebGL context loss; production paused and displayed graphics recovery"
+    },
+    {
+      "browser": "AndroidDesktop Chromium156.0.8076.0 snapshot",
+      "path": "Native text-input accessory",
+      "result": "Native Java assertion in keyboard_accessory.ManualFillingComponentBridge.show when search received focus; passed journey used direct SVG chart selection"
+    }
+  ],
+  "limits": [
+    "Official AndroidDesktop snapshot is a current Android Blink diagnostic, not stable branded Chrome Mobile.",
+    "Passing renderer was software Vulkan/llvmpipe, not a physical phone GPU benchmark.",
+    "No physical-phone thermal, battery, latency or sustained frame-rate claim.",
+    "No full Android campaign, native keyboard-entry or full device/browser matrix certification."
+  ],
+  "screenshots": [
+    {
+      "path": "images/android-native-flight.webp",
+      "encoding": "Lossless WebP conversion; original screenshot dimensions preserved",
+      "sha256": "3fa15fd78d4f742d46737a56e8976a92d28ea35249c0eee90b43435b60dc9495"
+    },
+    {
+      "path": "images/android-graphics-recovery.webp",
+      "encoding": "Lossless WebP conversion; original screenshot dimensions preserved",
+      "sha256": "f1730b7a548d171bf654a8fd6b75b8fcdd009505a7a05141925c84314335995a"
+    }
+  ]
+}
