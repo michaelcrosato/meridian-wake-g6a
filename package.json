@@ -1,0 +1,21 @@
+{
+	"name": "meridian-wake-g6a",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite --host 0.0.0.0",
+		"build": "vite build",
+		"preview": "vite preview --host 0.0.0.0",
+		"test": "node --test tests/*.test.js",
+		"test:e2e": "npm run build && playwright test"
+	},
+	"dependencies": {
+		"three": "0.186.1",
+		"@dimforge/rapier3d-compat": "0.21.0"
+	},
+	"devDependencies": {
+		"vite": "8.3.1",
+		"@playwright/test": "1.63.0"
+	}
+}
