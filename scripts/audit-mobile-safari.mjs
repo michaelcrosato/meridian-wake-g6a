@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { access, cp, mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 
@@ -15,11 +16,36 @@ const exec = promisify(execFile);
 const ELEMENT = "element-6066-11e4-a52e-4f735466cecf";
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 
-export function selectSimulators(inventory, families, udid) {
+function modelRank(name) {
+	if (/^iPhone \d+ Pro$/.test(name)) return 0;
+	if (/^iPhone \d+$/.test(name)) return 1;
+	if (/^iPhone \d+e$/.test(name)) return 2;
+	if (/^iPhone/.test(name)) return /Air|Max|Plus/.test(name) ? 6 : 3;
+	if (/^iPad \(/.test(name)) return 0;
+	if (/^iPad Air 11-inch/.test(name)) return 1;
+	if (/^iPad Air/.test(name)) return 2;
+	if (/^iPad mini/.test(name)) return 3;
+	if (/^iPad Pro 11-inch/.test(name)) return 4;
+	return 6;
+}
+
+export function validateBootStatus(output) {
+	// CoreSimulator can return exit 0 for a terminal migration failure.
+	assert(
+		!/Data Migration Failed|System App Failed|Status=(?:3|5),\s*isTerminal=YES/i.test(
+			output,
+		),
+		"Simulator boot failed during migration/system startup; refusing to start an app audit",
+	);
+}
+
+export function selectSimulators(inventory, families, udid, runtimeVersion) {
 	const available = Object.entries(inventory.devices || {}).flatMap(
 		([runtime, devices]) => {
 			const version = runtime.match(/\.iOS-([\d-]+)$/)?.[1];
 			if (!version) return [];
+			if (runtimeVersion && version.replaceAll("-", ".") !== runtimeVersion)
+				return [];
 			return devices
 				.filter(
 					(device) =>
@@ -36,6 +62,7 @@ export function selectSimulators(inventory, families, udid) {
 	available.sort(
 		(a, b) =>
 			b.version.localeCompare(a.version, "en", { numeric: true }) ||
+			modelRank(a.name) - modelRank(b.name) ||
 			b.name.localeCompare(a.name, "en", { numeric: true }),
 	);
 	if (udid) {
@@ -64,8 +91,11 @@ function selfTest() {
 		devices: {
 			"com.apple.CoreSimulator.SimRuntime.iOS-9-3": [make("iPhone 6", "old")],
 			"com.apple.CoreSimulator.SimRuntime.iOS-26-5": [
+				make("iPhone Air", "air"),
+				make("iPhone 17 Pro Max", "max"),
 				make("iPhone 17 Pro", "phone"),
-				make("iPad Pro 11-inch", "tablet"),
+				make("iPad Pro 13-inch (M5)", "large"),
+				make("iPad (A16)", "tablet"),
 			],
 			"com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
 				make("iPhone 18", "unavailable", false),
@@ -82,6 +112,10 @@ function selfTest() {
 	assert.equal(selectSimulators(inventory, [], "old")[0].version, "9.3");
 	assert.throws(() => selectSimulators(inventory, [], "unavailable"));
 	assert.throws(() => selectSimulators(inventory, ["android"]));
+	assert.throws(() =>
+		validateBootStatus("Status=3, isTerminal=YES\nData Migration Failed"),
+	);
+	validateBootStatus("Status=4294967295, isTerminal=YES\nFinished");
 	console.log(
 		"Simulator selection self-check passed; no Apple browser was run.",
 	);
@@ -93,6 +127,8 @@ export async function main(argv = process.argv.slice(2)) {
 		options: {
 			devices: { type: "string", default: "iphone,ipad" },
 			"device-udid": { type: "string" },
+			"runtime-version": { type: "string" },
+			"reuse-device": { type: "boolean", default: false },
 			artifacts: { type: "string", default: "artifacts/mobile-safari" },
 			url: { type: "string" },
 			"preview-port": { type: "string", default: "4176" },
@@ -106,6 +142,9 @@ export async function main(argv = process.argv.slice(2)) {
 		console.log(`Usage: node scripts/audit-mobile-safari.mjs [--devices iphone,ipad]
   --list                 Print selected installed Simulators without booting.
   --device-udid UDID      Audit one explicit installed iPhone/iPad Simulator.
+  --runtime-version X.Y  Select that installed iOS runtime explicitly.
+  --reuse-device         Reuse the selected preinstalled device instead of
+                         creating an isolated temporary device of its type.
   --url URL              Use an existing preview; otherwise start built dist/.
   --artifacts DIRECTORY  Default: artifacts/mobile-safari.
   --self-test            Check discovery logic on any OS; does not run Safari.
@@ -140,6 +179,7 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 		sources: [
 			"https://webkit.org/blog/9395/webdriver-is-coming-to-safari-in-ios-13/",
 			"https://bugs.webkit.org/show_bug.cgi?id=322937",
+			"https://developer.apple.com/documentation/safari-developer-tools/ios-enabling-webdriver",
 		],
 	};
 	async function host(command, args, timeout = 30000) {
@@ -212,6 +252,7 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 				.split(",")
 				.map((s) => s.trim()),
 			values["device-udid"],
+			values["runtime-version"],
 		);
 		summary.selected = devices;
 		if (values.list) {
@@ -223,7 +264,15 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 			xcode: await host("xcodebuild", ["-version"]),
 			macOS: await host("sw_vers", []),
 			safaridriver: await host("/usr/bin/safaridriver", ["--version"]),
+			developerDirectory: (await host("xcode-select", ["-p"])).trim(),
+			memoryBytes: Number((await host("sysctl", ["-n", "hw.memsize"])).trim()),
 		};
+		const simulatorApp = join(
+			summary.host.developerDirectory,
+			"Applications",
+			"Simulator.app",
+		);
+		await access(simulatorApp);
 		const port = Number(values["preview-port"]);
 		const driverPort = Number(values["driver-port"]);
 		for (const p of [port, driverPort])
@@ -248,35 +297,51 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 			async () => (await fetch(root, { signal: AbortSignal.timeout(5000) })).ok,
 			"production preview",
 		);
-		for (const device of devices) {
+		for (const template of devices) {
+			const device = { ...template };
 			const directory = `${artifacts}/${device.family}`;
 			await mkdir(directory, { recursive: true });
 			const evidence = {
 				device,
+				template,
 				startedAt: new Date().toISOString(),
 				status: "running",
 				checks: [],
 				controls: [],
 				commands: [],
 				screenshots: [],
+				phases: [],
 			};
 			summary.devices.push(evidence);
 			let driver,
 				session,
 				bootedHere = false,
+				createdHere = false,
 				transportTimedOut = false;
 			const persist = () =>
 				writeFile(
 					`${directory}/evidence.json`,
 					`${JSON.stringify(evidence, null, 2)}\n`,
 				);
+			async function phase(name) {
+				evidence.phase = name;
+				evidence.phases.push({ name, startedAt: new Date().toISOString() });
+				console.log(`${device.family}: ${name}`);
+				await persist();
+			}
 			async function command(path, method = "GET", body, timeout = 20000) {
 				assert(
 					!/\/actions(?:\/|$)/.test(path),
 					"W3C Actions are prohibited in the iOS audit",
 				);
-				const record = { path, method, startedAt: new Date().toISOString() };
+				const record = {
+					path,
+					method,
+					phase: evidence.phase,
+					startedAt: new Date().toISOString(),
+				};
 				evidence.commands.push(record);
+				await persist();
 				const started = Date.now();
 				try {
 					const response = await fetch(
@@ -305,6 +370,7 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 					throw error;
 				} finally {
 					record.ms = Date.now() - started;
+					await persist();
 				}
 			}
 			const execute = (script, args = []) =>
@@ -387,38 +453,185 @@ addEventListener('unhandledrejection',e=>mobileAudit.errors.push(String(e.reason
 for(const type of ['pointerdown','pointerup','pointercancel','touchstart','touchend','click','input','change'])
 document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit.events.push({type:e.type,trusted:e.isTrusted,pointerType:e.pointerType||null,tag:e.target.tagName,action:e.target.closest?.('[data-action]')?.dataset.action||null,id:e.target.id||null});},true);return true;`);
 			}
+			async function diagnostics() {
+				evidence.diagnostics = {};
+				const probes = [
+					["host-processes", "ps", ["-axo", "pid,ppid,rss,state,comm"]],
+					["host-memory", "vm_stat", []],
+					[
+						"simulator-states",
+						"xcrun",
+						["simctl", "list", "devices", "booted", "-j"],
+					],
+					[
+						"simulator-host-log",
+						"log",
+						[
+							"show",
+							"--last",
+							"3m",
+							"--style",
+							"compact",
+							"--predicate",
+							'process == "Simulator" OR process == "safaridriver" OR process CONTAINS "CoreSimulator"',
+						],
+					],
+				];
+				for (const [name, executable, args] of probes) {
+					try {
+						const text = await host(executable, args, 15000);
+						await writeFile(`${directory}/${name}.txt`, text);
+						evidence.diagnostics[name] = `${device.family}/${name}.txt`;
+					} catch (error) {
+						evidence.diagnostics[name] = { error: error.message };
+					}
+				}
+			}
+			async function driverDiagnostics() {
+				const source = join(homedir(), "Library/Logs/com.apple.WebDriver");
+				try {
+					for (const entry of await readdir(source)) {
+						const path = join(source, entry);
+						if ((await stat(path)).mtimeMs >= Date.parse(summary.startedAt))
+							await cp(path, join(directory, "webdriver-diagnostics", entry), {
+								recursive: true,
+							});
+					}
+				} catch (error) {
+					evidence.driverDiagnosticError = error.message;
+				}
+			}
 			try {
 				console.log(
 					`Auditing ${device.name} / iOS ${device.version} / ${device.udid}`,
 				);
-				if (device.state !== "Booted") {
-					await host("xcrun", ["simctl", "boot", device.udid], 120000);
-					bootedHere = true;
-				}
-				await host(
-					"xcrun",
-					["simctl", "bootstatus", device.udid, "-b"],
-					180000,
-				);
-				await host(
-					"xcrun",
-					["simctl", "launch", device.udid, "com.apple.mobilesafari"],
-					60000,
-				);
+				// Verify the server and host automation before CoreSimulator startup can
+				// consume resources. This is infrastructure evidence, not an iOS result.
+				await phase("host-driver-health");
 				driver = processWithLog(
 					"/usr/bin/safaridriver",
 					["--port", String(driverPort), "--diagnose"],
 					device.family,
 				);
-				await waitFor(
-					async () =>
-						(
-							await fetch(`${driverRoot}/status`, {
-								signal: AbortSignal.timeout(5000),
-							})
-						).ok,
-					"safaridriver",
+				await waitFor(async () => {
+					assert.equal(
+						driver.exitCode,
+						null,
+						"safaridriver exited before becoming ready",
+					);
+					const health = await command("/status", "GET", undefined, 10000);
+					return health.ready === false ? false : health;
+				}, "recorded safaridriver health");
+				await phase("host-remote-automation-preflight");
+				const hostSession = await command(
+					"/session",
+					"POST",
+					{
+						capabilities: {
+							alwaysMatch: { browserName: "Safari", platformName: "macOS" },
+						},
+					},
+					60000,
 				);
+				session = hostSession.sessionId;
+				evidence.hostAutomation = {
+					capabilities: hostSession.capabilities,
+					status: "session-accepted",
+				};
+				await command("", "DELETE", undefined, 10000);
+				session = undefined;
+				if (!values["reuse-device"] && !values["device-udid"]) {
+					await phase("create-isolated-simulator");
+					assert(
+						device.deviceTypeIdentifier,
+						"Selected installed device lacks its device type",
+					);
+					device.templateUDID = device.udid;
+					device.udid = (
+						await host("xcrun", [
+							"simctl",
+							"create",
+							`Meridian ${device.family} ${Date.now()}`,
+							device.deviceTypeIdentifier,
+							device.runtime,
+						])
+					).trim();
+					assert(
+						/^[A-F0-9-]{36}$/i.test(device.udid),
+						"simctl create did not return a UDID",
+					);
+					device.state = "Shutdown";
+					device.dataPath = join(
+						homedir(),
+						"Library/Developer/CoreSimulator/Devices",
+						device.udid,
+						"data",
+					);
+					device.logPath = join(
+						homedir(),
+						"Library/Logs/CoreSimulator",
+						device.udid,
+					);
+					createdHere = true;
+				}
+				await phase("boot-simulator");
+				if (device.state !== "Booted") {
+					await host("xcrun", ["simctl", "boot", device.udid], 120000);
+					bootedHere = true;
+				}
+				await host("open", [
+					"-a",
+					simulatorApp,
+					"--args",
+					"-CurrentDeviceUDID",
+					device.udid,
+				]);
+				await phase("wait-for-complete-migration");
+				evidence.bootStatus = await host(
+					"xcrun",
+					["simctl", "bootstatus", device.udid, "-b"],
+					180000,
+				);
+				validateBootStatus(evidence.bootStatus);
+				await phase("simulator-services");
+				evidence.simulatorServices = await host(
+					"xcrun",
+					["simctl", "spawn", device.udid, "launchctl", "list"],
+					20000,
+				);
+				assert(
+					/SpringBoard/.test(evidence.simulatorServices),
+					"SpringBoard is not running after bootstatus",
+				);
+				await host(
+					"xcrun",
+					[
+						"simctl",
+						"io",
+						device.udid,
+						"screenshot",
+						`${directory}/00-booted-device.png`,
+					],
+					20000,
+				);
+				await phase("launch-mobile-safari");
+				await host(
+					"xcrun",
+					["simctl", "launch", device.udid, "com.apple.mobilesafari"],
+					60000,
+				);
+				await host(
+					"xcrun",
+					[
+						"simctl",
+						"io",
+						device.udid,
+						"screenshot",
+						`${directory}/00-safari-ready.png`,
+					],
+					20000,
+				);
+				await phase("create-ios-session");
 				const created = await command(
 					"/session",
 					"POST",
@@ -435,6 +648,8 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 					90000,
 				);
 				session = created.sessionId;
+				evidence.simulatorAutomation =
+					"Confirmed by accepted native iOS WebDriver session; no guessed preference writes";
 				evidence.capabilities = created.capabilities;
 				assert.equal(
 					created.capabilities.platformName.toLowerCase(),
@@ -443,6 +658,7 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 				);
 				if (created.capabilities["safari:deviceUDID"])
 					assert.equal(created.capabilities["safari:deviceUDID"], device.udid);
+				await phase("application-journey");
 				await command("/timeouts", "POST", {
 					implicit: 0,
 					pageLoad: 60000,
@@ -620,7 +836,9 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 			} catch (error) {
 				evidence.status = "failed";
 				evidence.error = error.stack;
+				evidence.failurePhase = evidence.phase;
 				evidence.transportTimedOut = transportTimedOut;
+				await persist();
 				if (session && !transportTimedOut) {
 					try {
 						evidence.failureBody = await execute(
@@ -642,6 +860,7 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 						15000,
 					);
 				} catch {}
+				await diagnostics();
 			} finally {
 				if (session && !transportTimedOut) {
 					try {
@@ -649,6 +868,11 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 					} catch {}
 				}
 				driver?.kill("SIGTERM");
+				if (driver) {
+					await delay(300);
+					if (driver.exitCode === null) driver.kill("SIGKILL");
+				}
+				await driverDiagnostics();
 				// A wedged iOS Automation pairing may outlive safaridriver itself.
 				try {
 					await host(
@@ -661,6 +885,13 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 					try {
 						await host("xcrun", ["simctl", "shutdown", device.udid], 30000);
 					} catch {}
+				}
+				if (createdHere) {
+					try {
+						await host("xcrun", ["simctl", "delete", device.udid], 30000);
+					} catch (error) {
+						evidence.cleanupError = error.message;
+					}
 				}
 				evidence.finishedAt = new Date().toISOString();
 				await persist();
