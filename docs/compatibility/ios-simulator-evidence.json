@@ -1,0 +1,112 @@
+{
+  "recordedAt": "2026-09-27T07:05:34Z",
+  "status": "native-ios-unverified",
+  "reason": "CI simulator/driver bootstrap stopped before a native iOS WebDriver session or application check.",
+  "nativeIosSessionsCreated": 0,
+  "applicationChecksPassed": 0,
+  "applicationScreenshots": [],
+  "physicalDeviceTested": false,
+  "finalAttempt": {
+    "runId": 36301736352,
+    "runUrl": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301736352",
+    "revision": "0640360619a7f43c9fc8fbb34561898a2dc1c6f4",
+    "runner": "macos-26-intel",
+    "host": {
+      "os": "macOS 26.6.1 (25G76)",
+      "memoryGiB": 14,
+      "xcode": "26.6 (17F113)",
+      "safaridriver": "Safari 26.6 (21624.4.5.11.5)"
+    },
+    "requestedRuntime": "iOS 26.5",
+    "deviceIsolation": "Separate fresh CI jobs and temporary simulators",
+    "devices": [
+      {
+        "family": "iphone",
+        "model": "iPhone 17 Pro",
+        "jobId": 108570508535,
+        "artifactUrl": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301736352/artifacts/10926371151",
+        "failurePhase": "boot-simulator",
+        "failure": "LaunchServices open request exceeded its subprocess deadline and was terminated; stderr was empty.",
+        "failedCommand": "open -a <selected Xcode Simulator.app> --args -CurrentDeviceUDID <temporary simulator>",
+        "observedCommandDurationMs": 65870,
+        "signal": "SIGTERM",
+        "bootRequested": true,
+        "bootCompletionObserved": false,
+        "nativeSessionRequested": false,
+        "driverHealthHttpStatus": 200,
+        "deviceScreenshotCaptured": false,
+        "mobileSafariLaunchAttempted": false
+      },
+      {
+        "family": "ipad",
+        "model": "iPad (A16)",
+        "jobId": 108570508646,
+        "artifactUrl": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301736352/artifacts/10925572739",
+        "failurePhase": "boot-simulator",
+        "failure": "LaunchServices open request exceeded its subprocess deadline and was terminated; stderr was empty.",
+        "failedCommand": "open -a <selected Xcode Simulator.app> --args -CurrentDeviceUDID <temporary simulator>",
+        "observedCommandDurationMs": 34371,
+        "signal": "SIGTERM",
+        "bootRequested": true,
+        "bootCompletionObserved": false,
+        "nativeSessionRequested": false,
+        "driverHealthHttpStatus": 200,
+        "deviceScreenshotCaptured": true,
+        "mobileSafariLaunchAttempted": false
+      }
+    ]
+  },
+  "capturedImage": {
+    "file": "ios-simulator-boot.png",
+    "sha256": "e7873fdd61f1888a5bc9cbd7ea41843c00c3b47bf10d278f48c1740f0c00dc40",
+    "source": "Final iPad artifact: ipad/failure-device.png",
+    "captureMethod": "xcrun simctl io screenshot",
+    "inspection": "Apple logo and partially filled OS boot-progress bar. This is simulator startup, not the game, a rendered game frame, or evidence of a game graphics failure."
+  },
+  "priorAttempts": [
+    {
+      "runId": 36299000280,
+      "runUrl": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36299000280",
+      "runner": "macos-latest (ARM, 7 GiB)",
+      "devices": "iPhone Air and iPad Pro 13-inch (M5), iOS 26.5",
+      "result": "The phone reported terminal Data Migration Failed despite bootstatus exit 0; its later driver health probe timed out. The tablet remained in boot migration. Neither reached an iOS session or app checks."
+    },
+    {
+      "runId": 36300219109,
+      "runUrl": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36300219109",
+      "runner": "Separate macos-latest ARM jobs, 7 GiB each",
+      "devices": "Fresh iPhone 17 Pro and iPad (A16), iOS 26.5",
+      "result": "Bootstatus reported Finished and host process logs showed SpringBoard. An ancillary launchctl probe stalled. Approximately 60 MiB free RAM and 2.3 GiB occupied by compression showed severe memory pressure; no explicit OOM-kill diagnosis was established. No iOS session or app checks."
+    },
+    {
+      "runId": 36301252982,
+      "runUrl": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301252982",
+      "runner": "Separate macos-26-intel jobs, 14 GiB each",
+      "devices": "iPhone 17 Pro and iPad (A16) selected, not booted",
+      "result": "Both jobs stopped at an unrelated desktop Safari session preflight: no compatible local Safari RWIApplication became ready within the driver deadline. This was not an iOS-session attempt."
+    }
+  ],
+  "harnessCorrections": [
+    "Reject explicit migration failure even when simctl returns exit 0.",
+    "Select standard smaller installed profiles; isolate device jobs and create fresh temporary simulators.",
+    "Record each bootstrap phase, native command, driver diagnostics and memory/process evidence.",
+    "Remove launchctl and desktop Safari session creation as mandatory iOS-readiness gates.",
+    "For future manual runs, request Simulator.app asynchronously while retaining completed bootstatus, MobileSafari launch and a real iOS session as mandatory checks."
+  ],
+  "futureManualScriptValidation": {
+    "checks": [
+      "node --check scripts/audit-mobile-safari.mjs",
+      "node scripts/audit-mobile-safari.mjs --self-test",
+      "biome check scripts/audit-mobile-safari.mjs"
+    ],
+    "runInNativeCI": false,
+    "noAdditionalCiRetryRequested": true
+  },
+  "evidenceLimits": [
+    "None of these runs establish that Meridian Wake works or fails in native iOS/iPadOS Safari.",
+    "Desktop Safari and Playwright WebKit/mobile emulation evidence must be reported separately.",
+    "No physical-phone performance, multi-touch, long-press control or native mobile audio/save claim is supported by these attempts.",
+    "Future script success still requires trusted WebDriver input, application screenshots, first-mission travel and docking, audio activation, and same-session save reload.",
+    "Device identifiers, workstation paths and stack-trace paths have been removed from this durable record. Full raw CI artifacts may expire under the workflow retention policy."
+  ]
+}

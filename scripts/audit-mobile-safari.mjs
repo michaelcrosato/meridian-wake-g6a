@@ -324,6 +324,7 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 			};
 			summary.devices.push(evidence);
 			let driver,
+				simulatorLauncher,
 				session,
 				bootedHere = false,
 				createdHere = false,
@@ -597,13 +598,29 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 					await host("xcrun", ["simctl", "boot", device.udid], 120000);
 					bootedHere = true;
 				}
-				await host("open", [
-					"-a",
-					simulatorApp,
-					"--args",
-					"-CurrentDeviceUDID",
-					device.udid,
-				]);
+				// LaunchServices may wait for Simulator's UI while the device boots.
+				// Request that UI concurrently; its CLI completion is not proof of
+				// device readiness. Bootstatus and the native iOS session remain gates.
+				evidence.simulatorAppLaunch = {
+					status: "requested",
+					startedAt: new Date().toISOString(),
+				};
+				simulatorLauncher = processWithLog(
+					"open",
+					["-a", simulatorApp, "--args", "-CurrentDeviceUDID", device.udid],
+					`${device.family}-simulator-ui`,
+				);
+				simulatorLauncher.on("error", (error) => {
+					evidence.simulatorAppLaunch.error = error.message;
+				});
+				simulatorLauncher.on("exit", (code, signal) => {
+					Object.assign(evidence.simulatorAppLaunch, {
+						status: "exited",
+						code,
+						signal,
+						finishedAt: new Date().toISOString(),
+					});
+				});
 				await phase("wait-for-complete-migration");
 				evidence.bootStatus = await host(
 					"xcrun",
@@ -901,6 +918,7 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 						evidence.cleanupError = error.message;
 					}
 				}
+				simulatorLauncher?.kill("SIGTERM");
 				evidence.finishedAt = new Date().toISOString();
 				await persist();
 				console.log(
