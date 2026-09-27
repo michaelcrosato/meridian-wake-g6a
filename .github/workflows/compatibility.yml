@@ -31,7 +31,7 @@ jobs:
           retention-days: 14
   mobile-safari:
     name: Native ${{ matrix.device }} Safari
-    runs-on: macos-latest
+    runs-on: macos-26-intel
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -45,7 +45,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: sudo /usr/bin/safaridriver --enable
-      - run: node scripts/audit-mobile-safari.mjs --devices ${{ matrix.device }}
+      - run: node scripts/audit-mobile-safari.mjs --devices ${{ matrix.device }} --runtime-version 26.5
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
