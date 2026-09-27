@@ -186,8 +186,8 @@ function clearControls() {
 	for (const button of document.querySelectorAll("[data-hold].active"))
 		button.classList.remove("active");
 }
-function setPanel(next) {
-	if (!panel) lastFocus = focusToken(document.activeElement);
+function setPanel(next, opener = document.activeElement) {
+	if (!panel) lastFocus = focusToken(opener);
 	else if (panel !== next) panelHistory.push(panel);
 	panel = next;
 	clearControls();
@@ -417,6 +417,7 @@ function modal(
 	return `<div class="modal-backdrop"><section class="modal ${small ? "small-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div><div class="eyebrow">${subtitle}</div><h2 id="modal-title">${titleText}</h2></div>${dismissible ? `<button class="close-button" data-action="close" aria-label="Close panel">${icon("close")}</button>` : ""}</header><div class="modal-body">${body}</div>${footer ? `<footer class="modal-footer">${footer}</footer>` : ""}</section></div>`;
 }
 function touchFlightContext() {
+	if (graphicsFault) return null;
 	return !title && !panel && focusedWindow && state().mode === "flight"
 		? [
 				state().systemId,
@@ -427,6 +428,7 @@ function touchFlightContext() {
 		: null;
 }
 function render({ focusFirst = false, returnFocus = false } = {}) {
+	if (graphicsFault && !panel) panel = "graphicsFault";
 	const previousFocus = focusToken(document.activeElement);
 	const scrollTop = $(".modal-body")?.scrollTop || 0;
 	const context = touchFlightContext();
@@ -1269,11 +1271,11 @@ async function handleAction(action, el) {
 		return;
 	}
 	if (action === "new") {
-		setPanel(hasSave() ? "confirmNew" : "new");
+		setPanel(hasSave() ? "confirmNew" : "new", el);
 		return;
 	}
 	if (action === "confirmNew") {
-		setPanel("new");
+		setPanel("new", el);
 		return;
 	}
 	if (action === "selectStarter") {
@@ -1291,7 +1293,7 @@ async function handleAction(action, el) {
 	}
 	if (action === "resumeConversation") {
 		dialogueDeferred = false;
-		setPanel("sourceDialogue");
+		setPanel("sourceDialogue", el);
 		return;
 	}
 	if (action === "close") {
@@ -1322,7 +1324,7 @@ async function handleAction(action, el) {
 		}
 		shopQuery = "";
 		shopPage = 0;
-		setPanel("port");
+		setPanel("port", el);
 		return;
 	}
 	if (action === "shopPrev" || action === "shopNext") {
@@ -1343,13 +1345,13 @@ async function handleAction(action, el) {
 			"port",
 		].includes(action)
 	) {
-		setPanel(action);
+		setPanel(action, el);
 		return;
 	}
 	if (action === "map") {
 		if (title) return;
 		selectedSystem = id || selectedSystem || state().systemId;
-		setPanel("map");
+		setPanel("map", el);
 		return;
 	}
 	if (action === "selectSystem") {

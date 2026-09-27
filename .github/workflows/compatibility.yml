@@ -2,7 +2,7 @@ name: Browser compatibility audit
 on:
   push:
     branches: [audit/browser-compatibility]
-    paths: ['src/**', 'tests/**', 'scripts/audit-safari.mjs', 'playwright*.js', '.github/workflows/compatibility.yml', 'package*.json']
+    paths: ['src/**', 'tests/**', 'scripts/audit-*.mjs', 'playwright*.js', '.github/workflows/compatibility.yml', 'package*.json']
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,4 +28,47 @@ jobs:
         with:
           name: safari-compatibility-evidence
           path: artifacts/safari/
+          retention-days: 14
+  mobile-safari:
+    name: Native iPhone and iPad Safari
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with: { node-version: '24.21.0', cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: sudo /usr/bin/safaridriver --enable
+      - run: node scripts/audit-mobile-safari.mjs --devices iphone,ipad
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: native-mobile-safari-evidence
+          path: artifacts/mobile-safari/
+          retention-days: 14
+  windows:
+    name: Windows ${{ matrix.browser }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, edge]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with: { node-version: '24.21.0', cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright test --config playwright.compat.config.js
+        env:
+          COMPAT_BROWSER: ${{ matrix.browser }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: windows-${{ matrix.browser }}-compatibility
+          path: artifacts/compatibility/
           retention-days: 14
