@@ -37,6 +37,10 @@ export function validateBootStatus(output) {
 		),
 		"Simulator boot failed during migration/system startup; refusing to start an app audit",
 	);
+	assert(
+		/Finished|already booted/i.test(output),
+		"CoreSimulator did not report completed boot; app readiness remains unverified",
+	);
 }
 
 export function selectSimulators(inventory, families, udid, runtimeVersion) {
@@ -206,6 +210,9 @@ is probed and marked unsupported if Safari provides no rotation endpoint.`);
 					args,
 					ms: Date.now() - started,
 					error: error.message,
+					code: error.code,
+					signal: error.signal,
+					killed: error.killed,
 					stdout: error.stdout,
 					stderr: error.stderr,
 				}),
@@ -593,44 +600,34 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 					180000,
 				);
 				validateBootStatus(evidence.bootStatus);
-				await phase("simulator-services");
-				evidence.simulatorServices = await host(
-					"xcrun",
-					["simctl", "spawn", device.udid, "launchctl", "list"],
-					20000,
-				);
-				assert(
-					/SpringBoard/.test(evidence.simulatorServices),
-					"SpringBoard is not running after bootstatus",
-				);
-				await host(
-					"xcrun",
-					[
-						"simctl",
-						"io",
-						device.udid,
-						"screenshot",
-						`${directory}/00-booted-device.png`,
-					],
-					20000,
-				);
+				evidence.bootValidation = {
+					status: "CoreSimulator-reported-complete",
+					boundary:
+						"Safari readiness still requires a native session and rendered application; launchctl is not a readiness gate",
+				};
 				await phase("launch-mobile-safari");
-				await host(
+				evidence.safariLaunch = await host(
 					"xcrun",
 					["simctl", "launch", device.udid, "com.apple.mobilesafari"],
 					60000,
 				);
-				await host(
-					"xcrun",
-					[
-						"simctl",
-						"io",
-						device.udid,
-						"screenshot",
-						`${directory}/00-safari-ready.png`,
-					],
-					20000,
-				);
+				// simctl's screen bridge can stall independently. Only the later
+				// WebDriver session/screenshots/real journey can satisfy app checks.
+				try {
+					await host(
+						"xcrun",
+						[
+							"simctl",
+							"io",
+							device.udid,
+							"screenshot",
+							`${directory}/00-safari-launch.png`,
+						],
+						15000,
+					);
+				} catch (error) {
+					evidence.preflightScreenshotError = error.message;
+				}
 				await phase("create-ios-session");
 				const created = await command(
 					"/session",
