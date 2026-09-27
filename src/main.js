@@ -10,6 +10,17 @@ import {
 } from "./game.js";
 import { brandMark, icon, shipDrawing } from "./icons.js";
 import { createScene } from "./scene.js";
+import {
+	BINDING_ACTIONS,
+	InputController,
+	keyLabel,
+	remappableCode,
+	shortcutBlocked,
+	textEntry,
+	focusableElements,
+	focusToken,
+	findFocus,
+} from "./input.js";
 
 const app = document.querySelector("#app");
 const SAVE_KEY = "meridian-wake-save-v1";
@@ -20,6 +31,7 @@ const defaults = {
 	muted: false,
 	diagnostics: true,
 	assist: true,
+	touchControls: "auto",
 };
 let settings = { ...defaults };
 try {
@@ -30,6 +42,10 @@ try {
 } catch {
 	/* defaults remain usable */
 }
+settings.touchControls = ["auto", "on", "off"].includes(settings.touchControls)
+	? settings.touchControls
+	: "auto";
+document.documentElement.dataset.touchControls = settings.touchControls;
 let game = new Game();
 let title = true;
 let panel = null;
@@ -50,6 +66,12 @@ let lastHud = 0;
 let modelTimeAccumulator = 0;
 const resumePanel = null;
 let lastFocus = null;
+const panelHistory = [];
+let bindingCapture = null;
+let keyboardLayout = null;
+let gamepadName = null;
+let dialogueDeferred = false;
+let focusedWindow = true;
 let catalog;
 let catalogQuery = "";
 let shopQuery = "";
@@ -57,8 +79,8 @@ let shopPage = 0;
 let sourceLoading = false;
 let sourceError = "";
 let landingReady = true;
-const keys = new Set();
-const held = new Set();
+const controls = new InputController(settings.bindings);
+settings.bindings = controls.bindings;
 const toasts = [];
 const $ = (selector) => document.querySelector(selector);
 const esc = (value) =>
@@ -129,23 +151,32 @@ function renderToasts() {
 			)
 			.join("");
 }
+function clearControls() {
+	controls.clear();
+	for (const button of document.querySelectorAll("[data-hold].active"))
+		button.classList.remove("active");
+}
 function setPanel(next) {
-	lastFocus = document.activeElement;
+	if (!panel) lastFocus = focusToken(document.activeElement);
+	else if (panel !== next) panelHistory.push(panel);
 	panel = next;
-	keys.clear();
-	held.clear();
+	clearControls();
 	autopilot = false;
-	render();
-	requestAnimationFrame(() =>
-		$(".modal .close-button, .modal button, .modal input")?.focus(),
-	);
+	render({ focusFirst: true });
 }
 function closePanel() {
-	if (!title && state().mode === "port") {
-		panel = "port";
-	} else panel = null;
-	render();
-	lastFocus?.focus?.();
+	if (bindingCapture) {
+		bindingCapture = null;
+		render();
+		return;
+	}
+	if (panel === "sourceDialogue")
+		dialogueDeferred = JSON.stringify(game.sourceDialogue?.());
+	panel =
+		panelHistory.pop() ||
+		(!title && state().mode === "port" && panel !== "port" ? "port" : null);
+	clearControls();
+	render({ returnFocus: !panel, focusFirst: !!panel });
 }
 function act(action, payload = {}) {
 	const ownedBefore = new Set((state().fleet || []).map((ship) => ship.id));
@@ -189,8 +220,8 @@ function act(action, payload = {}) {
 			: "click",
 	);
 	if (action === "launch") {
-		keys.clear();
-		held.clear();
+		panelHistory.length = 0;
+		clearControls();
 		approachActorId = null;
 		approachWreckId = null;
 		panel = null;
@@ -215,8 +246,8 @@ function act(action, payload = {}) {
 		audio?.startMusic("port");
 	}
 	if (action === "jump") {
-		keys.clear();
-		held.clear();
+		panelHistory.length = 0;
+		clearControls();
 		approachActorId = null;
 		approachWreckId = null;
 		panel = null;
@@ -225,11 +256,22 @@ function act(action, payload = {}) {
 		audio?.play("jump");
 	}
 	if (action === "rescue") {
+		panelHistory.length = 0;
 		panel = "port";
 		encounterKey = "";
 	}
 	if (state().mode === "ending") panel = "ending";
-	if (game.sourceDialogue?.()) panel = "sourceDialogue";
+	if (
+		["sourceOffer", "sourceChoose", "sourceAccept", "sourceComplete"].includes(
+			action,
+		)
+	)
+		dialogueDeferred = false;
+	if (
+		game.sourceDialogue?.() &&
+		JSON.stringify(game.sourceDialogue()) !== dialogueDeferred
+	)
+		panel = "sourceDialogue";
 	else if (panel === "sourceDialogue")
 		panel = state().mode === "port" ? "port" : "journal";
 	if (state().mode === "destroyed") panel = "destroyed";
@@ -261,6 +303,10 @@ function syncScene() {
 	}
 }
 async function startGame(continuing = false) {
+	panelHistory.length = 0;
+	dialogueDeferred = false;
+	bindingCapture = null;
+	clearControls();
 	if (!ready) return;
 	if (continuing) {
 		try {
@@ -324,7 +370,7 @@ function hud() {
 		)
 		.join(
 			"",
-		)}<button data-action="cloak" aria-label="Toggle cloak" title="Cloak (C)" class="${s.cloaked ? "active" : ""}" ${!st.cloakAvailable || s.mode !== "flight" ? "disabled" : ""}>${icon("shield")}<span>${s.cloaked ? "Cloaked" : "Cloak"}</span></button></nav><div class="hud-wallet"><span id="credits-value">${money(s.credits)}</span> <span class="small">cr</span><small>${s.debt > 0 ? `${money(s.debt)} cr loan` : "DEBT FREE"}</small></div></header><section class="location"><div class="eyebrow">${esc(sy.faction || "The frontier")} / ${s.mode === "port" ? "Docked" : "In flight"}</div><h2>${esc(sy.name)}</h2><p>${esc(typeof sy.planet === "string" ? sy.planet : sy.planet?.name || "Deep space")} <span class="muted">·</span> ${Number(sy.danger) > 1 ? "Contested space" : "Local traffic"}</p></section><aside class="mission-tracker"><div class="eyebrow">${story?.accepted ? "Active transmission" : "Captain’s heading"}</div><h3>${esc(story?.name || story?.title || "An open sky")}</h3><p id="mission-objective">${esc(story?.accepted ? story.objective : story ? "Visit the spaceport to hear the next transmission." : "Trade, explore, and discover the stories between the stars.")}</p><button data-action="journal">Open mission journal ↗</button></aside><div id="actor-markers"></div><div class="flight-crosshair"></div><div class="flight-hint" id="flight-hint">${s.mode === "flight" ? "Hold W to thrust · A / D to turn" : ""}</div><section class="status-panel"><div class="ship-status-name">${esc(st.name || "Sparrow")} <span>${s.mode === "flight" ? "FREE FLIGHT" : "BERTH SECURED"}</span></div>${meter("SHIELD", "shield", s.shield, st.maxShield)}${meter("HULL", "hull", s.hull, st.maxHull)}${meter("FUEL", "fuel", s.fuel, st.maxFuel)}${meter("POWER", "power", s.energy ?? 100, st.maxEnergy ?? 100)}${meter("HEAT", "heat", s.heat ?? 0, st.maxHeat ?? 100)}<div class="weapon-readout" id="secondary-readout"></div></section><div class="bottom-actions">${s.mode === "port" ? `<button class="action-button primary" data-action="launch">${icon("launch")} Depart spaceport <kbd>L</kbd></button>` : `<button class="action-button primary" data-action="land">${icon("land")} Land <kbd>L</kbd></button><button class="action-button" data-action="map">${icon("route")} Plot a course <kbd>M</kbd></button><button class="action-button" data-action="flightActions" aria-label="Ship actions">${icon("scan")} Actions <kbd>E</kbd></button>`}</div><div class="radar" aria-hidden="true"><div class="radar-ship">▲</div><div id="radar-contacts"></div><div class="radar-label" id="radar-label">LOCAL SCANNER</div></div><div class="touch-controls" aria-label="Touch flight controls"><div class="touch-cluster"><button data-hold="left" aria-label="Turn left">↶</button><button data-hold="thrust" aria-label="Thrust">↑</button><button data-hold="right" aria-label="Turn right">↷</button><button data-hold="brake" aria-label="Brake">↓</button><button data-hold="boost" aria-label="Boost" title="Hold to boost">⇧</button></div><div class="touch-cluster"><button data-hold="secondary" aria-label="Fire secondary weapon" title="Secondary weapon (F)">${icon("missile")}</button><button class="fire-touch" data-hold="fire" aria-label="Fire weapons">${icon("bolt")}</button></div></div><footer class="footer-strip"><span id="diagnostics">${settings.diagnostics ? "RENDERER ONLINE" : ""}</span><span class="footer-help">WASD Flight <i>·</i> SPACE Fire <i>·</i> M Map <i>·</i> ESC Pause</span><span><button data-action="toggleMute" title="Toggle sound" aria-label="Toggle sound">${icon(settings.muted ? "muted" : "sound")}</button><button data-action="controls" title="Flight handbook" aria-label="Flight handbook">${icon("help")}</button><span id="save-status">AUTOSAVE ON</span></span></footer>${panel ? '<div class="pause-marker">FLIGHT PAUSED</div>' : ""}`;
+		)}<button data-action="cloak" aria-label="Toggle cloak" title="Cloak (${esc(bindingLabel("cloak"))})" class="${s.cloaked ? "active" : ""}" ${!st.cloakAvailable || s.mode !== "flight" ? "disabled" : ""}>${icon("shield")}<span>${s.cloaked ? "Cloaked" : "Cloak"}</span></button></nav><div class="hud-wallet"><span id="credits-value">${money(s.credits)}</span> <span class="small">cr</span><small>${s.debt > 0 ? `${money(s.debt)} cr loan` : "DEBT FREE"}</small></div></header><section class="location"><div class="eyebrow">${esc(sy.faction || "The frontier")} / ${s.mode === "port" ? "Docked" : "In flight"}</div><h2>${esc(sy.name)}</h2><p>${esc(typeof sy.planet === "string" ? sy.planet : sy.planet?.name || "Deep space")} <span class="muted">·</span> ${Number(sy.danger) > 1 ? "Contested space" : "Local traffic"}</p></section><aside class="mission-tracker"><div class="eyebrow">${story?.accepted ? "Active transmission" : "Captain’s heading"}</div><h3>${esc(story?.name || story?.title || "An open sky")}</h3><p id="mission-objective">${esc(story?.accepted ? story.objective : story ? "Visit the spaceport to hear the next transmission." : "Trade, explore, and discover the stories between the stars.")}</p><button data-action="journal">Open mission journal ↗</button></aside><div id="actor-markers"></div><div class="flight-crosshair"></div><div class="flight-hint" id="flight-hint">${s.mode === "flight" ? `Hold ${esc(bindingLabel("thrust"))} to thrust · ${esc(bindingLabel("left"))} / ${esc(bindingLabel("right"))} to turn` : ""}</div><section class="status-panel"><div class="ship-status-name">${esc(st.name || "Sparrow")} <span>${s.mode === "flight" ? "FREE FLIGHT" : "BERTH SECURED"}</span></div>${meter("SHIELD", "shield", s.shield, st.maxShield)}${meter("HULL", "hull", s.hull, st.maxHull)}${meter("FUEL", "fuel", s.fuel, st.maxFuel)}${meter("POWER", "power", s.energy ?? 100, st.maxEnergy ?? 100)}${meter("HEAT", "heat", s.heat ?? 0, st.maxHeat ?? 100)}<div class="weapon-readout" id="secondary-readout"></div></section><div class="bottom-actions">${s.mode === "port" ? `<button class="action-button primary" data-action="launch">${icon("launch")} Depart spaceport <kbd>${esc(bindingLabel("land"))}</kbd></button>` : `<button class="action-button primary" data-action="land">${icon("land")} Land <kbd>${esc(bindingLabel("land"))}</kbd></button><button class="action-button" data-action="map">${icon("route")} Plot a course <kbd>${esc(bindingLabel("map"))}</kbd></button><button class="action-button" data-action="flightActions" aria-label="Ship actions">${icon("scan")} Actions <kbd>${esc(bindingLabel("flightActions"))}</kbd></button>`}</div><div class="radar" aria-hidden="true"><div class="radar-ship">▲</div><div id="radar-contacts"></div><div class="radar-label" id="radar-label">LOCAL SCANNER</div></div><div class="touch-controls" aria-label="Touch flight controls"><div class="touch-cluster"><button data-hold="left" aria-label="Turn left">↶</button><button data-hold="thrust" aria-label="Thrust">↑</button><button data-hold="right" aria-label="Turn right">↷</button><button data-hold="brake" aria-label="Brake">↓</button><button data-hold="boost" aria-label="Boost" title="Hold to boost">⇧</button></div><div class="touch-cluster"><button data-hold="secondary" aria-label="Fire secondary weapon" title="Secondary weapon (${esc(bindingLabel("secondary"))})">${icon("missile")}</button><button class="fire-touch" data-hold="fire" aria-label="Fire weapons">${icon("bolt")}</button></div></div><footer class="footer-strip"><span id="diagnostics">${settings.diagnostics ? "RENDERER ONLINE" : ""}</span><span class="footer-help">${esc(bindingLabel("thrust"))} Thrust <i>·</i> ${esc(bindingLabel("fire"))} Fire <i>·</i> ${esc(bindingLabel("map"))} Map <i>·</i> ESC Pause</span><span><button data-action="toggleMute" title="Toggle sound" aria-label="Toggle sound">${icon(settings.muted ? "muted" : "sound")}</button><button data-action="controls" title="Flight handbook" aria-label="Flight handbook">${icon("help")}</button><span id="save-status">AUTOSAVE ON</span></span></footer>${panel ? '<div class="pause-marker">FLIGHT PAUSED</div>' : ""}`;
 }
 function meter(label, id, value, max) {
 	return `<div class="bar-row ${id}"><span>${label}</span><div class="meter"><i id="${id}-bar" style="width:${Math.min(100, Math.max(0, (100 * value) / (max || 1)))}%"></i></div><span id="${id}-value">${id === "fuel" ? Math.floor(value) : Math.ceil(value)}</span></div>`;
@@ -332,8 +378,31 @@ function meter(label, id, value, max) {
 function modal(titleText, subtitle, body, footer = "", small = false) {
 	return `<div class="modal-backdrop"><section class="modal ${small ? "small-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div><div class="eyebrow">${subtitle}</div><h2 id="modal-title">${titleText}</h2></div><button class="close-button" data-action="close" aria-label="Close panel">${icon("close")}</button></header><div class="modal-body">${body}</div>${footer ? `<footer class="modal-footer">${footer}</footer>` : ""}</section></div>`;
 }
-function render() {
+function render({ focusFirst = false, returnFocus = false } = {}) {
+	const previousFocus = focusToken(document.activeElement);
+	const scrollTop = $(".modal-body")?.scrollTop || 0;
+	// Captured pointers belong to the old nodes. Never retain a hold after a redraw.
+	controls.clearPointers();
 	app.innerHTML = `${title ? titleScreen() : hud()}${panel ? renderPanel() : ""}<div class="toast-stack" id="toasts" aria-live="polite"></div>${!ready ? '<div class="loading"><div><div class="eyebrow">Meridian Wake</div><div class="loading-orbit"></div><p id="load-message">Preparing your corner of the galaxy…</p></div></div>' : ""}`;
+	for (const element of app.children) {
+		if (
+			element.classList.contains("modal-backdrop") ||
+			element.id === "toasts" ||
+			element.classList.contains("loading")
+		)
+			continue;
+		element.inert = !!panel;
+	}
+	const scope = $(".modal") || app;
+	const target = returnFocus
+		? findFocus(lastFocus, scope)
+		: !focusFirst && (!panel || previousFocus?.inModal)
+			? findFocus(previousFocus, scope)
+			: null;
+	if (target) target.focus({ preventScroll: true });
+	else if (panel) focusableElements(scope)[0]?.focus({ preventScroll: true });
+	if (panel && !focusFirst && $(".modal-body"))
+		$(".modal-body").scrollTop = scrollTop;
 	renderToasts();
 	syncScene();
 }
@@ -349,6 +418,8 @@ function renderPanel() {
 			return renderOptions();
 		case "controls":
 			return renderControls();
+		case "bindings":
+			return renderBindings();
 		case "journal":
 			return renderJournal();
 		case "ship":
@@ -395,7 +466,7 @@ function renderPort() {
 		return modal(
 			"Spaceport out of range",
 			"Landing required",
-			'<p class="muted small">Land on the local planet to trade, pick up work, refuel, and hear the latest transmissions. Press L in flight for landing assistance.</p><div class="button-row"><button class="primary" data-action="land">Begin landing approach</button></div>',
+			`<p class="muted small">Land on the local planet to trade, pick up work, refuel, and hear the latest transmissions. Press ${esc(bindingLabel("land"))} in flight for landing assistance.</p><div class="button-row"><button class="primary" data-action="land">Begin landing approach</button></div>`,
 			"",
 			true,
 		);
@@ -687,7 +758,7 @@ function renderMap() {
 		canJump = links(sy).includes(sel.id);
 	const route = findRoute(sy.id, sel.id);
 	const charted = game.isCharted?.(sel.id) ?? visited.has(sel.id);
-	const svg = `<svg class="star-map" viewBox="0 0 590 405" role="img" aria-label="Star chart around ${esc(sy.name)}">${connections.join("")}${mapSystems
+	const svg = `<svg class="star-map" viewBox="0 0 590 405" role="group" aria-label="Star chart around ${esc(sy.name)}">${connections.join("")}${mapSystems
 		.map((a) => {
 			const p = project(a);
 			return `<g role="button" tabindex="0" aria-label="Select ${esc(a.name)}" data-action="selectSystem" data-id="${esc(a.id)}" class="map-node ${visited.has(a.id) ? "visited" : ""} ${a.id === sy.id ? "current" : ""} ${a.id === sel.id ? "selected" : ""}"><circle cx="${p.x}" cy="${p.y}" r="${a.id === sy.id ? 5 : 3}"/><text x="${p.x + 8}" y="${p.y + 3}">${esc(a.name)}</text>${a.id === sy.id ? `<circle cx="${p.x}" cy="${p.y}" r="11" style="fill:none;stroke:#efb37355"/>` : ""}</g>`;
@@ -859,7 +930,17 @@ function interactActor(command, id = selectedActorId) {
 	toast(result.message);
 	audio?.play("click");
 	save();
-	if (game.sourceDialogue?.()) panel = "sourceDialogue";
+	if (
+		["sourceOffer", "sourceChoose", "sourceAccept", "sourceComplete"].includes(
+			action,
+		)
+	)
+		dialogueDeferred = false;
+	if (
+		game.sourceDialogue?.() &&
+		JSON.stringify(game.sourceDialogue()) !== dialogueDeferred
+	)
+		panel = "sourceDialogue";
 	render();
 	return true;
 }
@@ -910,44 +991,81 @@ function renderActions() {
 			.join(
 				"",
 			)}</div><div class="button-row"><button data-action="fleetCommand" data-id="protect">Fleet: protect</button><button data-action="fleetCommand" data-id="attack">Fleet: attack</button><button data-action="fleetCommand" data-id="hold">Fleet: hold</button></div>`,
-		`<span>Tip: B boards a target · G scoops fuel · R scans.</span>`,
+		`<span>Tip: ${esc(bindingLabel("board"))} boards a target · ${esc(bindingLabel("scoop"))} scoops fuel · ${esc(bindingLabel("scan"))} scans.</span>`,
 		true,
+	);
+}
+function fullscreenAvailable() {
+	return (
+		typeof document.documentElement.requestFullscreen === "function" &&
+		document.fullscreenEnabled !== false
 	);
 }
 function renderOptions() {
 	return modal(
 		"Make yourself at home.",
 		"Flight preferences",
-		`<div class="settings-row"><div><strong>Rendering quality</strong><p>Auto responds to measured frame times. High adds detail and effects. Balanced reduces resolution, shadows, and physics load.</p></div><select id="quality-setting" aria-label="Rendering quality">${["Auto", "High", "Balanced"].map((q) => `<option ${settings.quality === q ? "selected" : ""}>${q}</option>`).join("")}</select></div><div class="settings-row"><div><strong>Master volume</strong><p>Original Endless Sky sound effects and ambience.</p></div><input id="volume-setting" aria-label="Master volume" type="range" min="0" max="1" step="0.05" value="${settings.volume}"></div><div class="settings-row"><div><strong>Sound</strong><p>Mute music, ambience, and effects.</p></div><button data-action="toggleMute">${settings.muted ? "Muted" : "Sound on"} ${icon(settings.muted ? "muted" : "sound")}</button></div><div class="settings-row"><div><strong>Fullscreen</strong><p>A little more room for the universe.</p></div><button data-action="fullscreen">${document.fullscreenElement ? "Exit" : "Enter"} ${icon("full")}</button></div><div class="settings-row"><div><strong>Flight diagnostics</strong><p>Show renderer backend, active preset, and frame time.</p></div><button data-action="toggleDiagnostics">${settings.diagnostics ? "Visible" : "Hidden"}</button></div>${!title ? '<div class="settings-row"><div><strong>Your captain’s record</strong><p>Saved automatically on this browser. Export a backup to carry your progress elsewhere.</p></div><button data-action="exportSave">Export save</button></div>' : ""}<div class="settings-row"><div><strong>Import a voyage</strong><p>Restore a previously exported Meridian Wake save.</p></div><button data-action="importSave">Import save</button><input id="save-file" type="file" accept="application/json,.json" hidden></div><div class="button-row">${!title ? '<button data-action="title">Save & return to title</button>' : ""}<button data-action="controls">Flight handbook</button><button data-action="about">About this voyage</button></div>`,
+		`<div class="settings-row"><div><strong>Rendering quality</strong><p>Auto responds to measured frame times. High adds detail and effects. Balanced reduces resolution, shadows, and physics load.</p></div><select id="quality-setting" aria-label="Rendering quality">${["Auto", "High", "Balanced"].map((q) => `<option ${settings.quality === q ? "selected" : ""}>${q}</option>`).join("")}</select></div><div class="settings-row"><div><strong>Master volume</strong><p>Original Endless Sky sound effects and ambience.</p></div><input id="volume-setting" aria-label="Master volume" type="range" min="0" max="1" step="0.05" value="${settings.volume}"></div><div class="settings-row"><div><strong>Sound</strong><p>Mute music, ambience, and effects.</p></div><button data-action="toggleMute">${settings.muted ? "Muted" : "Sound on"} ${icon(settings.muted ? "muted" : "sound")}</button></div><div class="settings-row"><div><strong>On-screen flight controls</strong><p>Auto follows your screen and pointing device. Always show also supports touch on hybrid laptops.</p></div><select id="touch-setting" aria-label="On-screen flight controls">${[
+			["auto", "Auto"],
+			["on", "Always show"],
+			["off", "Hide"],
+		]
+			.map(
+				([value, label]) =>
+					`<option value="${value}" ${settings.touchControls === value ? "selected" : ""}>${label}</option>`,
+			)
+			.join(
+				"",
+			)}</select></div><div class="settings-row"><div><strong>Keyboard controls</strong><p>Change primary and alternate bindings for any keyboard layout.</p></div><button data-action="bindings">Change controls</button></div><div class="settings-row"><div><strong>Controller</strong><p>${gamepadName ? esc(gamepadName) : "Standard gamepads are detected when you press a controller button."}</p></div><button data-action="controls">Controller guide</button></div><div class="settings-row"><div><strong>Fullscreen</strong><p>${fullscreenAvailable() || document.fullscreenElement ? "A little more room for the universe." : "This browser does not allow page fullscreen. Use its display options if available."}</p></div><button data-action="fullscreen" ${!fullscreenAvailable() && !document.fullscreenElement ? "disabled" : ""}>${document.fullscreenElement ? "Exit" : fullscreenAvailable() ? "Enter" : "Unavailable"} ${icon("full")}</button></div><div class="settings-row"><div><strong>Flight diagnostics</strong><p>Show renderer backend, active preset, and frame time.</p></div><button data-action="toggleDiagnostics">${settings.diagnostics ? "Visible" : "Hidden"}</button></div>${!title ? '<div class="settings-row"><div><strong>Your captain’s record</strong><p>Saved automatically on this browser. Export a backup to carry your progress elsewhere.</p></div><button data-action="exportSave">Export save</button></div>' : ""}<div class="settings-row"><div><strong>Import a voyage</strong><p>Restore a previously exported Meridian Wake save.</p></div><button data-action="importSave">Import save</button><input id="save-file" type="file" accept="application/json,.json" hidden></div><div class="button-row">${!title ? '<button data-action="title">Save & return to title</button>' : ""}<button data-action="controls">Flight handbook</button><button data-action="about">About this voyage</button></div>`,
 		"<span>Preferences save automatically.</span>",
 		true,
 	);
 }
 function renderControls() {
 	const entries = [
-		["Thrust", "W / ↑"],
-		["Turn left / right", "A / D"],
-		["Brake", "S / ↓"],
-		["Fire primary weapons", "Space"],
-		["Fire secondary weapon", "F"],
-		["Select mission contact", "T"],
-		["Afterburner", "Shift"],
-		["Toggle cloak (equipped ships)", "C"],
-		["Land / launch", "L"],
-		["Starmap / jump routes", "M"],
-		["Ship operations", "E"],
-		["Board a disabled target", "B"],
-		["Harvest stellar fuel", "G"],
-		["Survey / scan selected ship", "R"],
-		["Mission journal", "J"],
-		["Ship loadout", "I"],
+		...BINDING_ACTIONS.map(([id, label]) => [label, bindingLabel(id)]),
 		["Pause / close panel", "Esc"],
 	];
 	return modal(
 		"A little guidance goes a long way.",
 		"The flight handbook",
-		`<div class="controls-grid">${entries.map(([label, key]) => `<div class="control-row"><span>${label}</span><kbd>${key}</kbd></div>`).join("")}</div><h3 class="section-label">A captain’s first day</h3><p class="small muted">Accept a transmission or delivery at the spaceport. Launch, open the starmap, and choose a linked system. Travel spends fuel and advances the day. Land at the destination to deliver cargo and hear the next chapter.</p><p class="small muted">Your ship carries momentum. Turn first, then thrust. Brake to slow down; use landing assistance to approach the planet. In combat, face your target and hold Space. Disabled enemies can be boarded for salvage or captured.</p><h3 class="section-label">On a touchscreen</h3><p class="small muted">Use the left thumb controls to steer, thrust, brake, and boost. Hold the lightning button to fire and the small missile button to launch an equipped secondary weapon. The shield button toggles a fitted cloak. Tap the map, landing, and operations buttons for the same choices as desktop.</p><h3 class="section-label">Your voyage, your pace</h3><p class="small muted">Menus pause flight. Local ports automatically service your ship when possible. Trading, passenger work, mining, side stories, and fleet building remain available alongside the main story. If your ship is destroyed or stranded, rescue gets you flying again.</p>`,
-		`<span>The stars will wait while you read.</span><button class="primary" data-action="close">Understood ${icon("check")}</button>`,
+		`<div class="controls-grid">${entries.map(([label, key]) => `<div class="control-row"><span>${label}</span><kbd>${key}</kbd></div>`).join("")}</div><h3 class="section-label">A captain’s first day</h3><p class="small muted">Accept a transmission or delivery at the spaceport. Launch, open the starmap, and choose a linked system. Travel spends fuel and advances the day. Land at the destination to deliver cargo and hear the next chapter.</p><p class="small muted">Your ship carries momentum. Turn first, then thrust. Brake to slow down; use landing assistance to approach the planet. In combat, face your target and hold ${esc(bindingLabel("fire"))}. Disabled enemies can be boarded for salvage or captured.</p><h3 class="section-label">On a touchscreen</h3><p class="small muted">Use the left thumb controls to steer, thrust, brake, and boost. Hold the lightning button to fire and the small missile button to launch an equipped secondary weapon. The shield button toggles a fitted cloak. Tap the map, landing, and operations buttons for the same choices as desktop.</p>${gamepadHandbook()}<h3 class="section-label">Your voyage, your pace</h3><p class="small muted">Menus pause flight. Local ports automatically service your ship when possible. Trading, passenger work, mining, side stories, and fleet building remain available alongside the main story. If your ship is destroyed or stranded, rescue gets you flying again.</p>`,
+		`<button data-action="bindings">Change keyboard controls</button><button class="primary" data-action="close">Understood ${icon("check")}</button>`,
+		true,
+	);
+}
+function bindingLabel(action) {
+	return controls.bindings[action]
+		.map((code) => keyLabel(code, keyboardLayout))
+		.join(" / ");
+}
+function gamepadHandbook() {
+	return `<h3 class="section-label">Standard gamepad</h3><p class="input-device-note small muted">${gamepadName ? `Connected: ${esc(gamepadName)}.` : "Connect a standard Xbox, PlayStation, or compatible controller and press a button to let the browser detect it."} Release the controls once after connecting, changing menus, or returning to this window.</p><div class="controls-grid">${[
+		["Flight: turn / thrust / brake", "Left stick / D-pad"],
+		["Primary / secondary weapons", "RT / RB · R2 / R1"],
+		["Afterburner / cloak", "LT / LB · L2 / L1"],
+		["Land or launch", "A / Cross"],
+		["Ship operations", "B / Circle"],
+		["Survey / select contact", "X / Y · Square / Triangle"],
+		["Board / harvest fuel", "Left / right stick press"],
+		["Starmap / pause", "View / Menu · Create / Options"],
+		["Menus: focus / activate / back", "D-pad / A / B"],
+		["Menus: change value / scroll", "Left–right / right stick"],
+	]
+		.map(
+			([label, key]) =>
+				`<div class="control-row"><span>${label}</span><kbd>${key}</kbd></div>`,
+		)
+		.join(
+			"",
+		)}</div><p class="input-device-note small muted">Gamepads use the browser’s standard mapping with a stick dead zone. Keyboard and touch remain available. Text searches use a keyboard. Browsers can require a click, tap, or keyboard press to enable audio, fullscreen, or the save-file picker; a controller button cannot grant that permission.</p>`;
+}
+function renderBindings() {
+	return modal(
+		"Make the controls your own.",
+		"Keyboard controls",
+		`<p class="input-device-note small muted">Select a binding, then press a key. The same key cannot control two actions. Escape cancels; Tab, Enter, Escape and Ctrl/Alt/Command combinations stay available for menus and browser commands. Bindings follow physical key positions. ${keyboardLayout ? "Labels match your current keyboard layout." : "Default letter labels use US positions; arrow controls work on every layout. Rebind any position for your keyboard."}</p>${bindingCapture ? `<p class="binding-prompt" role="status">Press a key for ${esc(BINDING_ACTIONS.find(([id]) => id === bindingCapture.action)[1].toLowerCase())}. <button data-action="cancelBinding">Cancel</button></p>` : ""}<div class="binding-list">${BINDING_ACTIONS.map(([action, label]) => `<div class="binding-row"><span>${label}</span><div>${[0, 1].map((slot) => `<button class="binding-key" data-action="rebind" data-id="${action}" data-slot="${slot}" aria-label="${esc(label)} ${slot ? "alternate" : "primary"} binding: ${esc(controls.bindings[action][slot] ? keyLabel(controls.bindings[action][slot], keyboardLayout) : "unassigned")}" ${bindingCapture?.action === action && bindingCapture.slot === slot ? 'aria-pressed="true"' : ""}>${esc(controls.bindings[action][slot] ? keyLabel(controls.bindings[action][slot], keyboardLayout) : "Add alternate")}</button>`).join("")}</div></div>`).join("")}</div>`,
+		'<button data-action="resetBindings">Restore default controls</button><button class="primary" data-action="close">Done</button>',
 		true,
 	);
 }
@@ -1032,6 +1150,40 @@ async function loadCatalog() {
 }
 async function handleAction(action, el) {
 	const id = el?.dataset?.id;
+	if (
+		["controls", "bindings"].includes(action) &&
+		!keyboardLayout &&
+		navigator.keyboard?.getLayoutMap
+	) {
+		navigator.keyboard
+			.getLayoutMap()
+			.then((map) => {
+				keyboardLayout = map;
+				if (["controls", "bindings"].includes(panel) && !bindingCapture)
+					render();
+			})
+			.catch(() => {});
+	}
+	if (action === "rebind") {
+		bindingCapture = { action: id, slot: Number(el.dataset.slot) };
+		clearControls();
+		render();
+		return;
+	}
+	if (action === "cancelBinding") {
+		bindingCapture = null;
+		render();
+		return;
+	}
+	if (action === "resetBindings") {
+		bindingCapture = null;
+		controls.resetBindings();
+		settings.bindings = controls.bindings;
+		persistSettings();
+		render();
+		toast("Default keyboard controls restored.");
+		return;
+	}
 	if (action === "new") {
 		setPanel(hasSave() ? "confirmNew" : "new");
 		return;
@@ -1054,6 +1206,7 @@ async function handleAction(action, el) {
 		return;
 	}
 	if (action === "resumeConversation") {
+		dialogueDeferred = false;
 		setPanel("sourceDialogue");
 		return;
 	}
@@ -1062,17 +1215,18 @@ async function handleAction(action, el) {
 		return;
 	}
 	if (action === "viewPort") {
+		panelHistory.length = 0;
 		panel = null;
 		render();
 		return;
 	}
 	if (action === "title") {
+		panelHistory.length = 0;
 		save();
 		title = true;
 		panel = null;
 		autopilot = false;
-		keys.clear();
-		held.clear();
+		clearControls();
 		scene?.setView("title");
 		render();
 		return;
@@ -1096,6 +1250,7 @@ async function handleAction(action, el) {
 		[
 			"options",
 			"controls",
+			"bindings",
 			"journal",
 			"ship",
 			"flightActions",
@@ -1137,6 +1292,10 @@ async function handleAction(action, el) {
 		return;
 	}
 	if (action === "fullscreen") {
+		if (!document.fullscreenElement && !fullscreenAvailable()) {
+			toast("This browser does not allow page fullscreen.", "error");
+			return;
+		}
 		try {
 			if (document.fullscreenElement) await document.exitFullscreen();
 			else await document.documentElement.requestFullscreen();
@@ -1182,8 +1341,7 @@ async function handleAction(action, el) {
 		} else {
 			autopilot = true;
 			panel = null;
-			keys.clear();
-			held.clear();
+			clearControls();
 			render();
 			toast(
 				"Landing approach engaged. Your ship will brake and dock automatically.",
@@ -1238,7 +1396,7 @@ async function handleAction(action, el) {
 		scene?.selectWreck(id);
 		scene?.selectActor(null);
 		toast(
-			"Disabled hull selected. Open Actions to approach, or B to board in range.",
+			`Disabled hull selected. Open Actions to approach, or ${bindingLabel("board")} to board in range.`,
 		);
 		return;
 	}
@@ -1250,8 +1408,7 @@ async function handleAction(action, el) {
 		autopilot = false;
 		scene?.selectWreck(id);
 		panel = null;
-		keys.clear();
-		held.clear();
+		clearControls();
 		render();
 		return;
 	}
@@ -1275,8 +1432,7 @@ async function handleAction(action, el) {
 		autopilot = false;
 		scene?.selectActor(id);
 		panel = null;
-		keys.clear();
-		held.clear();
+		clearControls();
 		render();
 		return;
 	}
@@ -1375,6 +1531,7 @@ async function handleAction(action, el) {
 		return;
 	}
 	if (action === "continueSandbox") {
+		panelHistory.length = 0;
 		act("continueSandbox");
 		panel = "port";
 		render();
@@ -1399,6 +1556,12 @@ app.addEventListener("change", async (event) => {
 	if (el.id === "mineral-focus") {
 		act("selectMineral", { mineralId: el.value });
 	}
+	if (el.id === "touch-setting") {
+		settings.touchControls = el.value;
+		document.documentElement.dataset.touchControls = el.value;
+		clearControls();
+		persistSettings();
+	}
 	if (el.id === "quality-setting") {
 		settings.quality = el.value;
 		scene?.setQuality(settings.quality);
@@ -1419,6 +1582,10 @@ app.addEventListener("change", async (event) => {
 			const loaded = Game.load(saved);
 			if (loaded.state.sourceQuests) await loaded.enableSourceMissions();
 			game = loaded;
+			panelHistory.length = 0;
+			dialogueDeferred = false;
+			bindingCapture = null;
+			clearControls();
 			if (scene) scene.systemId = null;
 			title = false;
 			panel =
@@ -1465,163 +1632,299 @@ app.addEventListener("input", (event) => {
 		input?.setSelectionRange(start, start);
 	}
 });
-app.addEventListener("pointerdown", (event) => {
-	// Keep the release attached to the selected contact as the world moves.
-	const marker = event.target.closest(".actor-marker");
-	if (marker) marker.setPointerCapture?.(event.pointerId);
-	const el = event.target.closest("[data-hold]");
-	if (el) {
-		event.preventDefault();
-		held.add(el.dataset.hold);
-		el.classList.add("active");
-		el.setPointerCapture?.(event.pointerId);
-		if (
-			["left", "right", "thrust", "brake", "boost"].includes(el.dataset.hold)
-		) {
-			autopilot = false;
-			approachActorId = null;
-			approachWreckId = null;
-		}
-	}
-});
-for (const type of ["pointerup", "pointercancel", "lostpointercapture"])
-	app.addEventListener(type, (event) => {
-		const el = event.target.closest("[data-hold]");
-		if (el) {
-			held.delete(el.dataset.hold);
-			el.classList.remove("active");
-		}
-	});
-window.addEventListener("blur", () => {
-	keys.clear();
-	held.clear();
-});
-window.addEventListener("keydown", (event) => {
-	if (event.key === "Tab" && panel) {
-		const nodes = [
-			...document.querySelectorAll(
-				'.modal button:not([disabled]), .modal input:not([hidden]), .modal select, .modal [tabindex="0"]',
-			),
-		];
-		if (nodes.length) {
-			const first = nodes[0],
-				last = nodes.at(-1);
-			if (event.shiftKey && document.activeElement === first) {
-				event.preventDefault();
-				last.focus();
-			} else if (!event.shiftKey && document.activeElement === last) {
-				event.preventDefault();
-				first.focus();
-			}
-		}
+function cancelApproach() {
+	autopilot = false;
+	approachActorId = null;
+	approachWreckId = null;
+}
+function runShortcut(action) {
+	if (action === "pause") {
+		if (panel) closePanel();
+		else if (!title) setPanel("options");
 		return;
 	}
-	if (event.key === "Escape") {
-		event.preventDefault();
-		if (panel === "sourceDialogue") {
-			panel = state().mode === "port" ? "port" : "journal";
-			render();
-			return;
-		}
-		if (title || panel) {
-			panel = null;
-			render();
-		} else setPanel("options");
-		return;
-	}
-	if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName))
-		return;
-	if (event.code === "Space" && event.target.closest("button")) return;
-	if (event.key === "Enter" && event.target.matches("[data-action]")) {
-		event.preventDefault();
-		handleAction(event.target.dataset.action, event.target);
-		return;
-	}
-	if (title || !ready) return;
-	if (
-		panel &&
-		[
-			"KeyW",
-			"KeyA",
-			"KeyS",
-			"KeyD",
-			"ArrowUp",
-			"ArrowDown",
-			"ArrowLeft",
-			"ArrowRight",
-			"Space",
-			"ShiftLeft",
-			"ShiftRight",
-			"KeyF",
-		].includes(event.code)
-	)
-		return;
-	if (
-		["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(
-			event.code,
-		)
-	)
-		event.preventDefault();
-	keys.add(event.code);
-	if (
-		[
-			"KeyW",
-			"KeyA",
-			"KeyS",
-			"KeyD",
-			"ArrowUp",
-			"ArrowDown",
-			"ArrowLeft",
-			"ArrowRight",
-			"ShiftLeft",
-			"ShiftRight",
-		].includes(event.code)
-	) {
-		autopilot = false;
-		approachActorId = null;
-		approachWreckId = null;
-	}
-	if (event.code === "KeyT") {
-		const actors = scene.getTelemetry().missionActors || [];
+	if (action === "target") {
+		if (panel || title) return;
+		const actors = scene?.getTelemetry().missionActors || [];
 		if (actors.length) {
 			selectedActorId =
 				actors[
-					(actors.findIndex((a) => a.id === selectedActorId) + 1) %
+					(actors.findIndex((actor) => actor.id === selectedActorId) + 1) %
 						actors.length
 				].id;
 			scene.selectActor(selectedActorId);
 		}
 		return;
 	}
-	if (event.repeat) return;
-	const shortcuts = {
-		KeyM: "map",
-		KeyL: "land",
-		KeyJ: "journal",
-		KeyI: "ship",
-		KeyE: "flightActions",
-		KeyB: "board",
-		KeyG: "scoop",
-		KeyR: "scan",
-		KeyC: "cloak",
-	};
-	if (shortcuts[event.code]) {
-		event.preventDefault();
-		handleAction(shortcuts[event.code]);
+	if (
+		panel &&
+		!["map", "journal", "ship", "flightActions", "land"].includes(action)
+	)
+		return;
+	if (panel === action) {
+		closePanel();
+		return;
 	}
+	handleAction(action).catch((error) => {
+		console.error(error);
+		toast("That operation could not complete.", "error");
+	});
+}
+function pauseForFocusLoss() {
+	focusedWindow = false;
+	clearControls();
+	cancelApproach();
+	if (!title) {
+		save();
+		if (!panel && state().mode === "flight") setPanel("options");
+	}
+}
+app.addEventListener("pointerdown", (event) => {
+	if (event.button !== 0) return;
+	const marker = event.target.closest(".actor-marker");
+	if (marker) marker.setPointerCapture?.(event.pointerId);
+	const el = event.target.closest("[data-hold]");
+	if (!el || panel || title || state().mode !== "flight") return;
+	event.preventDefault();
+	controls.pointerDown(event.pointerId, el.dataset.hold);
+	el.classList.add("active");
+	el.setPointerCapture?.(event.pointerId);
+	if (["left", "right", "thrust", "brake", "boost"].includes(el.dataset.hold))
+		cancelApproach();
 });
-window.addEventListener("keyup", (event) => keys.delete(event.code));
+for (const type of ["pointerup", "pointercancel", "lostpointercapture"])
+	window.addEventListener(
+		type,
+		(event) => {
+			controls.pointerUp(event.pointerId);
+			for (const el of document.querySelectorAll("[data-hold]"))
+				el.classList.toggle(
+					"active",
+					[...controls.pointers.values()].includes(el.dataset.hold),
+				);
+		},
+		true,
+	);
+window.addEventListener("blur", pauseForFocusLoss);
+window.addEventListener("focus", () => {
+	focusedWindow = true;
+	clearControls();
+});
+window.addEventListener("gamepaddisconnected", () => {
+	clearControls();
+});
+window.addEventListener("keydown", (event) => {
+	if (shortcutBlocked(event)) {
+		controls.keys.clear();
+		return;
+	}
+	if (bindingCapture) {
+		if (event.repeat) return;
+		if (event.key === "Escape") {
+			event.preventDefault();
+			bindingCapture = null;
+			render();
+			return;
+		}
+		if (!remappableCode(event.code)) {
+			bindingCapture = null;
+			render();
+			return;
+		}
+		event.preventDefault();
+		const result = controls.rebind(
+			bindingCapture.action,
+			bindingCapture.slot,
+			event.code,
+		);
+		if (result.ok) {
+			settings.bindings = controls.bindings;
+			persistSettings();
+			bindingCapture = null;
+			render();
+			toast("Keyboard binding saved.");
+		} else toast(result.message, "error");
+		return;
+	}
+	if (event.key === "Tab" && panel) {
+		const nodes = focusableElements($(".modal"));
+		if (
+			nodes.length &&
+			(!nodes.includes(document.activeElement) ||
+				(event.shiftKey
+					? document.activeElement === nodes[0]
+					: document.activeElement === nodes.at(-1)))
+		) {
+			event.preventDefault();
+			(event.shiftKey ? nodes.at(-1) : nodes[0]).focus();
+		}
+		return;
+	}
+	if (event.key === "Escape") {
+		event.preventDefault();
+		if (!event.repeat) runShortcut("pause");
+		return;
+	}
+	if (textEntry(event.target)) return;
+	const roleButton = event.target.closest('[role="button"]');
+	if (roleButton && ["Enter", " "].includes(event.key)) {
+		event.preventDefault();
+		if (!event.repeat)
+			roleButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		return;
+	}
+	if (
+		["Space", "Enter"].includes(event.code) &&
+		event.target.closest("button, a, summary")
+	)
+		return;
+	if (title || !ready) return;
+	const result = controls.keyDown(event, {
+		flight: !panel && state().mode === "flight",
+	});
+	if (result.handled) event.preventDefault();
+	if (result.manual) cancelApproach();
+	if (result.action) runShortcut(result.action);
+});
+window.addEventListener("keyup", (event) => controls.keyUp(event));
+// Text entry and IME composition must also release a previously held flight key.
+app.addEventListener("focusin", (event) => {
+	if (textEntry(event.target)) controls.keys.clear();
+});
+app.addEventListener("compositionstart", () => clearControls());
+document.addEventListener("fullscreenchange", () => {
+	if (panel === "options") render();
+});
+let gamepadAudioNotice = false;
+let unsupportedGamepadNotice = false;
+function gamepadMenu(action) {
+	const scope = $(".modal") || app;
+	const nodes = focusableElements(scope);
+	if (!nodes.length) return;
+	const active = nodes.includes(document.activeElement)
+		? document.activeElement
+		: null;
+	if (action === "activate") {
+		const target = active || nodes[0];
+		if (
+			["fullscreen", "importSave", "exportSave"].includes(target.dataset.action)
+		) {
+			target.focus();
+			toast("Use a click, tap, or keyboard press for this browser permission.");
+			return;
+		}
+		if (target.matches("input, select, textarea")) {
+			toast(
+				target.matches('select, input[type="range"], input[type="number"]')
+					? "Use left and right to change this value; up and down move to another control."
+					: "Use a keyboard to enter text, or move to another control.",
+			);
+			return;
+		}
+		if (typeof target.click === "function") target.click();
+		else target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		return;
+	}
+	if (
+		["left", "right"].includes(action) &&
+		active?.matches('select, input[type="range"], input[type="number"]')
+	) {
+		const direction = action === "right" ? 1 : -1;
+		if (active.tagName === "SELECT") {
+			const options = [...active.options].filter((option) => !option.disabled);
+			const index = options.findIndex((option) => option.selected);
+			active.value =
+				options[Math.max(0, Math.min(options.length - 1, index + direction))]
+					?.value ?? active.value;
+		} else {
+			try {
+				direction > 0 ? active.stepUp() : active.stepDown();
+			} catch {}
+		}
+		active.dispatchEvent(new Event("input", { bubbles: true }));
+		active.dispatchEvent(new Event("change", { bubbles: true }));
+		return;
+	}
+	const direction = ["left", "up"].includes(action) ? -1 : 1;
+	const index = active
+		? (nodes.indexOf(active) + direction + nodes.length) % nodes.length
+		: direction > 0
+			? 0
+			: nodes.length - 1;
+	nodes[index].focus();
+	nodes[index].scrollIntoView({ block: "nearest" });
+}
+function pollGamepad(now, dt) {
+	let pads;
+	try {
+		pads = navigator.getGamepads?.() || [];
+	} catch {
+		pads = [];
+	}
+	const mode =
+		document.hidden || !focusedWindow || !ready
+			? "disabled"
+			: title || panel || state().mode !== "flight"
+				? "menu"
+				: "flight";
+	const result = controls.pollGamepads(pads, now, mode);
+	if (result.unsupported && !unsupportedGamepadNotice)
+		toast(
+			"This controller has no standard browser mapping. Keyboard, mouse and touch controls remain available.",
+		);
+	unsupportedGamepadNotice = result.unsupported;
+	if (result.changed) {
+		gamepadName = result.id;
+		if (result.connected)
+			toast(
+				"Gamepad connected. Release its controls, then open the flight handbook for the mapping.",
+			);
+		else if (!title && state().mode === "flight" && !panel) setPanel("options");
+		if (["options", "controls"].includes(panel)) render();
+	}
+	if (mode === "disabled") return;
+	if (result.manual) cancelApproach();
+	if (result.scroll && $(".modal-body"))
+		$(".modal-body").scrollTop += result.scroll * dt * 500;
+	for (const action of result.actions) {
+		if (
+			!gamepadAudioNotice &&
+			!settings.muted &&
+			audio?.context?.state !== "running"
+		) {
+			gamepadAudioNotice = true;
+			toast(
+				"A click, tap, or keyboard press may be needed to enable sound in this browser.",
+			);
+		}
+		if (action.startsWith("menu:")) gamepadMenu(action.slice(5));
+		else runShortcut(action);
+	}
+}
+function resumeAudioFromGesture(event) {
+	if (
+		!event.isTrusted ||
+		settings.muted ||
+		!audio?.context ||
+		audio.context.state === "running"
+	)
+		return;
+	audio
+		.init()
+		.then(() =>
+			audio.startMusic(!title && state().mode === "port" ? "port" : "music"),
+		);
+}
+window.addEventListener("pointerdown", resumeAudioFromGesture);
+window.addEventListener("keydown", resumeAudioFromGesture);
 window.addEventListener("beforeunload", () => {
 	if (!title) save();
 });
 document.addEventListener("visibilitychange", () => {
-	if (document.hidden) {
-		keys.clear();
-		held.clear();
-		if (!title) {
-			save();
-			if (!panel) setPanel("options");
-		}
+	if (document.hidden) pauseForFocusLoss();
+	else {
+		focusedWindow = document.hasFocus();
+		clearControls();
 	}
 });
 function updateHud(t) {
@@ -1679,9 +1982,9 @@ function updateHud(t) {
 						? "HOLDING POSITION · WAITING FOR CONVOY"
 						: "AUTOPILOT · LANDING APPROACH"
 					: tele.enemies > 0
-						? `${tele.enemies} HOSTILE CONTACT${tele.enemies === 1 ? "" : "S"} · FACE TARGET + SPACE TO FIRE`
+						? `${tele.enemies} HOSTILE CONTACT${tele.enemies === 1 ? "" : "S"} · FACE TARGET + ${bindingLabel("fire")} TO FIRE`
 						: tele.landReady
-							? "BERTH IN RANGE · PRESS L TO LAND"
+							? `BERTH IN RANGE · PRESS ${bindingLabel("land")} TO LAND`
 							: s.overheated
 								? "WEAPONS OVERHEATED · WAIT FOR COOLING"
 								: s.energy < 3
@@ -1731,7 +2034,7 @@ function updateHud(t) {
 			approachWreckId = null;
 			toast(
 				wreck
-					? "Disabled ship in boarding range. Press B or open Actions."
+					? `Disabled ship in boarding range. Press ${bindingLabel("board")} or open Actions.`
 					: "That disabled ship is no longer present.",
 			);
 		}
@@ -1791,23 +2094,17 @@ function frame(now) {
 	const dt = Math.min((now - lastFrame) / 1000, 0.1);
 	lastFrame = now;
 	if (scene) {
+		pollGamepad(now, dt);
 		const paused =
-			title || !!panel || state().mode !== "flight" || document.hidden;
+			title ||
+			!!panel ||
+			state().mode !== "flight" ||
+			document.hidden ||
+			!focusedWindow;
 		const s = state();
 		scene.setPaused(paused);
 		const input = {
-			thrust:
-				keys.has("KeyW") || keys.has("ArrowUp") || held.has("thrust") ? 1 : 0,
-			turn:
-				(keys.has("KeyD") || keys.has("ArrowRight") || held.has("right")
-					? 1
-					: 0) -
-				(keys.has("KeyA") || keys.has("ArrowLeft") || held.has("left") ? 1 : 0),
-			brake: keys.has("KeyS") || keys.has("ArrowDown") || held.has("brake"),
-			fire: keys.has("Space") || held.has("fire"),
-			secondary: keys.has("KeyF") || held.has("secondary"),
-			boost:
-				keys.has("ShiftLeft") || keys.has("ShiftRight") || held.has("boost"),
+			...controls.flight(),
 			autopilot,
 			approachActorId,
 			approachWreckId,
@@ -1922,7 +2219,12 @@ function frame(now) {
 			game.act("landReady", { ready: true });
 			act("land", { approach: true });
 		}
-		if (!title && game.sourceDialogue?.() && !panel) {
+		if (
+			!title &&
+			!panel &&
+			game.sourceDialogue?.() &&
+			JSON.stringify(game.sourceDialogue()) !== dialogueDeferred
+		) {
 			panel = "sourceDialogue";
 			render();
 		}
