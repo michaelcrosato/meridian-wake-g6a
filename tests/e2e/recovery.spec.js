@@ -90,6 +90,32 @@ test("lost graphics pauses the voyage, saves it and offers a working reload path
 	await expect(
 		page.getByRole("heading", { name: "Graphics paused", exact: true }),
 	).toBeVisible();
+	const pausedVoyage = await page.evaluate(() => window.meridian.state);
+	await page.keyboard.press("m");
+	await expect(page.locator(".star-map")).toHaveCount(0);
+	await expect(
+		page.getByRole("button", { name: /^(Jump to|Next hop:)/ }),
+	).toHaveCount(0);
+	await page.keyboard.press("l");
+	await page.keyboard.press("e");
+	await expect(
+		page.getByRole("heading", { name: "Graphics paused", exact: true }),
+	).toBeVisible();
+	expect(await page.evaluate(() => window.meridian.state)).toEqual(
+		pausedVoyage,
+	);
+	await page.getByRole("button", { name: "Options", exact: true }).click();
+	await page.getByLabel("Rendering quality").selectOption("Balanced");
+	const backup = page.waitForEvent("download");
+	await page.getByRole("button", { name: "Export save", exact: true }).click();
+	expect((await backup).suggestedFilename()).toMatch(/meridian-wake-day/);
+	expect(await page.evaluate(() => window.meridian.state)).toEqual(
+		pausedVoyage,
+	);
+	await page.getByRole("button", { name: "Close panel", exact: true }).click();
+	await expect(
+		page.getByRole("heading", { name: "Graphics paused", exact: true }),
+	).toBeVisible();
 	await page
 		.getByRole("button", { name: "Reload graphics", exact: true })
 		.click();

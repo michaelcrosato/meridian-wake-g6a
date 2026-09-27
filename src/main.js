@@ -66,6 +66,25 @@ let lastSaveAttempt = 0;
 let saveUnavailable = false;
 let preferencesUnavailable = false;
 let graphicsFault = null;
+const graphicsRecoveryActions = new Set([
+	"reloadGraphics",
+	"exportSave",
+	"options",
+	"close",
+	"pause",
+	"controls",
+	"bindings",
+	"rebind",
+	"cancelBinding",
+	"resetBindings",
+	"toggleMute",
+	"toggleDiagnostics",
+	"fullscreen",
+	"about",
+	"catalog",
+	"journal",
+	"ship",
+]);
 let lastHud = 0;
 let modelTimeAccumulator = 0;
 const resumePanel = null;
@@ -157,6 +176,14 @@ function graphicsInterrupted(details) {
 	panelHistory.length = 0;
 	setPanel("graphicsFault");
 }
+function graphicsActionBlocked(action) {
+	if (!graphicsFault || graphicsRecoveryActions.has(action)) return false;
+	toast(
+		"Reload graphics before continuing your voyage. Options and save export remain available.",
+		"error",
+	);
+	return true;
+}
 function hasSave() {
 	try {
 		return !!localStorage.getItem(SAVE_KEY);
@@ -210,6 +237,11 @@ function closePanel() {
 	render({ returnFocus: !panel, focusFirst: !!panel });
 }
 function act(action, payload = {}) {
+	if (graphicsFault) {
+		const message = "Reload graphics before continuing your voyage.";
+		toast(message, "error");
+		return { ok: false, message };
+	}
 	const ownedBefore = new Set((state().fleet || []).map((ship) => ship.id));
 	const result = game.act(action, payload);
 	if (action === "land" && !result.ok) autopilot = false;
@@ -1230,6 +1262,7 @@ async function loadCatalog() {
 	}
 }
 async function handleAction(action, el) {
+	if (graphicsActionBlocked(action)) return;
 	const id = el?.dataset?.id;
 	if (action === "reloadGraphics") {
 		save();
@@ -1736,6 +1769,7 @@ function cancelApproach() {
 	approachWreckId = null;
 }
 function runShortcut(action) {
+	if (graphicsActionBlocked(action)) return;
 	if (action === "pause") {
 		if (panel) closePanel();
 		else if (!title) setPanel("options");
@@ -2104,7 +2138,7 @@ function updateHud(t) {
 	if (secondaryReadout) {
 		const w = game.secondaryWeapon?.();
 		secondaryReadout.textContent = w
-			? `${w.name.toUpperCase()} · ${w.ammoCount ?? "∞"} [F]`
+			? `${w.name.toUpperCase()} · ${w.ammoCount ?? "∞"} [${bindingLabel("secondary")}]`
 			: "SECONDARY HARDPOINT EMPTY";
 	}
 	const objective = $("#mission-objective");
