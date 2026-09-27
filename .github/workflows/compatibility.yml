@@ -1,17 +1,24 @@
 name: Browser compatibility audit
 on:
   push:
-    branches: [audit/browser-compatibility]
+    branches: [main, audit/browser-compatibility]
     paths: ['src/**', 'tests/**', 'scripts/audit-*.mjs', 'playwright*.js', '.github/workflows/compatibility.yml', 'package*.json']
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Browser checks to run (native mobile requires working simulator services)
+        type: choice
+        options: [desktop, mobile, all]
+        default: desktop
 permissions:
   contents: read
 concurrency:
-  group: compatibility-${{ github.ref }}
+  group: compatibility-${{ github.ref }}-${{ inputs.suite || 'desktop' }}
   cancel-in-progress: true
 jobs:
   safari:
     name: Apple Safari on macOS
+    if: github.event_name != 'workflow_dispatch' || inputs.suite != 'mobile'
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -31,6 +38,7 @@ jobs:
           retention-days: 14
   mobile-safari:
     name: Native ${{ matrix.device }} Safari
+    if: github.event_name == 'workflow_dispatch' && inputs.suite != 'desktop'
     runs-on: macos-26-intel
     timeout-minutes: 25
     strategy:
@@ -54,6 +62,7 @@ jobs:
           retention-days: 14
   windows:
     name: Windows ${{ matrix.browser }}
+    if: github.event_name != 'workflow_dispatch' || inputs.suite != 'mobile'
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:

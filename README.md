@@ -6,7 +6,7 @@ A three-dimensional, brick-built browser reimagining of **Endless Sky**. Start w
 
 **Generated:** 26 September 2026. **AI model:** GPT-6 Astra (`g6a`). The generation record also appears on the title and About screens.
 
-[GitHub build checks](https://github.com/michaelcrosato/meridian-wake-g6a/actions/workflows/ci.yml) · [Completion report and coverage](COMPLETION_REPORT.md)
+[GitHub build checks](https://github.com/michaelcrosato/meridian-wake-g6a/actions/workflows/ci.yml) · [Completion report and coverage](COMPLETION_REPORT.md) · [Browser compatibility audit](docs/compatibility-audit.md)
 
 The authoritative source is [endless-sky/endless-sky](https://github.com/endless-sky/endless-sky), pinned to [3248c43994eb3d545265366c8eba909a6646f4d2](https://github.com/endless-sky/endless-sky/tree/3248c43994eb3d545265366c8eba909a6646f4d2). This is an independent adaptation, with original geometry, interface, mission prose, and browser game rules. See [the completion report](COMPLETION_REPORT.md) for the distinction between implemented behavior, adapted content, and source inventory.
 
@@ -58,9 +58,11 @@ Choose the Sparrow, Shuttle, or Star Barge. Read the first transmission at New B
 
 Touch screens have simultaneous steering, thrust, brake, boost, primary/secondary fire and cloak controls, plus the same map, port, and operations interfaces. Portrait and landscape layouts preserve these decisions. Menus pause flight. A full handbook is accessible from the title and flight HUD.
 
+Options → **Change controls** saves two keyboard bindings per action. Touch controls can be shown automatically, always shown, or hidden. Standard gamepads support flight and menu navigation: left stick/D-pad steers, RT fires, LT boosts, A lands/launches, View opens the map, and Menu pauses. The handbook lists the complete Xbox/PlayStation equivalents. Text entry and browser permission actions can require a keyboard, click or tap. See [input support](docs/input-compatibility.md) for details and tested limits.
+
 Ports provide contracts, trading, local shipyards, outfitters, fleet services, and loan repayment. Interstellar travel costs fuel and advances the day; contracts have deadlines. Ship capacity, equipment space, energy, cooling, and crew costs affect your choices. Defeated enemies leave physical hulks that can be approached, boarded or captured. Protected convoys must survive and arrive; disabled allies can be assisted. Specialized ships and outfits enable gas-giant, stellar-garden, wormhole and cloaked expeditions. Rescue preserves your story after a defeat or fuel shortage.
 
-Progress autosaves to this browser's local storage. Options provides JSON save export/import, volume, mute, fullscreen, and diagnostics. A new captain replaces the local autosave; export a backup first if you want to retain an older voyage.
+Progress autosaves to this browser's local storage. Options provides JSON save export/import, volume, mute, fullscreen when supported, and diagnostics. If storage fails, the game displays an export-backup reminder and limits retries. Graphics device loss pauses flight and offers save export and reload. A new captain replaces the local autosave; export a backup first if you want to retain an older voyage.
 
 ## Rendering and simulation
 
@@ -68,7 +70,8 @@ Progress autosaves to this browser's local storage. Options provides JSON save e
 - `WebGPURenderer` from `three/webgpu`, with automatic WebGL2 fallback. Both backends render the same scene and materials.
 - TSL/node PBR materials, procedural HDR environment, faceted geometry, directional shadows, node bloom, and GTAO in High quality. Three r186 calls its node post-processing pipeline `RenderPipeline`.
 - Four-sample antialiasing. High and Balanced change pixel ratio, shadow resolution, AO/bloom, asteroid density, particle counts, and active physics limits.
-- Auto chooses from measured frame time with hysteresis. It does not inspect device names or user agents. Diagnostics reports backend, effective preset, frame time, and body count.
+- Auto chooses from visible frame time with hysteresis, including very slow frames while excluding hidden-tab gaps. It does not inspect device names or user agents. Diagnostics reports backend, effective preset, frame time, draw calls, geometry and body count.
+- Asteroids use two instanced palette batches while retaining individual colliders and mining behavior. A matched High scene used 181 draw calls instead of 211; this is a measured submission reduction, not a universal frame-rate claim.
 - Rapier runs fixed 1/60-second steps with interpolated positions. The world uses simple spherical colliders, bounded mass, friction and restitution, continuous collision detection, explicit removal, and preset body caps.
 
 ## Verification
@@ -80,7 +83,9 @@ node scripts/verify-source.mjs
 npm run build
 ```
 
-The source/audio verifier also uses `ffprobe` from FFmpeg. Browser tests use Playwright Chromium. If its browser is not installed, run `npx playwright install chromium` once. The browser checks follow actual UI actions through starting a captain, accepting a mission, traveling, landing, completing it, saving/reloading, trading, equipment browsing, original native dialogue, touch controls, audio/fullscreen/save export, and the earned epilogue boundary. Physics and game-rule tests exercise state invariants and complete campaign routes independently.
+The source/audio verifier also uses `ffprobe` from FFmpeg. The regression suite uses Playwright Chromium; install it with `npx playwright install chromium` if needed. It follows actual UI actions through missions, travel, trading, dialogue, saves, audio, fullscreen, touch, remapping, controller navigation, storage failure and graphics recovery. Physics and game-rule tests exercise state invariants and complete campaign routes independently.
+
+For the browser/viewport matrix, run `COMPAT_BROWSER=chrome npm run test:compat` (also `edge`, `opera`, `firefox`, `webkit`, or `chromium`). The selected browser must be installed; custom paths use `COMPAT_EXECUTABLE`. Actual Safari and vendor Firefox have a separate WebDriver harness. [The audit report](docs/compatibility-audit.md) records exact versions, commands, screenshots, mobile limitations, and the distinction between vendor browsers and engine builds.
 
 For Linux WebGPU visual testing without a physical desktop, use a private Xvfb display. Headless Chromium can produce black WebGPU screenshots even when rendering works. WebGL2 fallback can be tested in ordinary headless Chromium. See [verification evidence](docs/verification.md) for the checked build's results and limitations.
 

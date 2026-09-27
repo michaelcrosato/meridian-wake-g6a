@@ -1,5 +1,6 @@
-import { test, expect } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
+import { expect, test } from "@playwright/test";
+
 const browserName = process.env.COMPAT_BROWSER || "chromium";
 const artifacts = `artifacts/compatibility/${browserName}`;
 const sizes = [

@@ -1,4 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
 async function captain(page) {
 	await page.addInitScript(() =>
 		localStorage.setItem(
@@ -104,7 +105,10 @@ test("lost graphics pauses the voyage, saves it and offers a working reload path
 	expect(await page.evaluate(() => window.meridian.state)).toEqual(
 		pausedVoyage,
 	);
-	await page.getByRole("button", { name: "Options", exact: true }).click();
+	await page
+		.getByRole("dialog")
+		.getByRole("button", { name: "Options", exact: true })
+		.click();
 	await page.getByLabel("Rendering quality").selectOption("Balanced");
 	const backup = page.waitForEvent("download");
 	await page.getByRole("button", { name: "Export save", exact: true }).click();

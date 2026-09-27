@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+
 const chromiumArgs = ["--no-sandbox", "--enable-unsafe-swiftshader"];
 const headed = process.env.COMPAT_HEADED === "1";
 const executable = process.env.COMPAT_EXECUTABLE;

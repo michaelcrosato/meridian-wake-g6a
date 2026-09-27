@@ -4,7 +4,7 @@ Generation date: **2026-09-26** (America/Vancouver). Model: **GPT-6 Astra (g6a)*
 
 ## Reproducible checks
 
-The release was installed from its lockfile with `npm ci`: 20 packages installed, 21 audited, zero reported vulnerabilities. `npm test` passed **139/139** tests, with no failures or skipped tests. `npm run build` produced the static Vite `dist/` artifact successfully.
+The original release was installed from its lockfile with `npm ci`: 20 packages installed, 21 audited, zero reported vulnerabilities. The subsequent compatibility audit expands the node suite from 139 to **155 tests**, all passing with no failures or skips. `npm run build` produces the static Vite `dist/` artifact successfully. Direct dependency versions remain unchanged.
 
 The node suites cover the real game rules, both Free Worlds branches, all major expanded routes and branch choices, source provenance/conditions/conversations/events, exact scoped NPC interactions, protected convoy damage/disable/assist/arrival/loss/retry, equipment/ammo/fleet/minerals/capability gates, required planet visits, saves, physics interpolation/body limits/cleanup, projectile authorization, source hull identity and special landmarks. Regression checks include accumulation at 120 Hz under repeated pause calls and upgraded ship speeds above 40 world units/second.
 
@@ -14,7 +14,7 @@ The [earned model voyage](model-voyage.json) starts with a Sparrow, 24,000 credi
 
 ## Browser checks
 
-Production-preview Playwright Chromium tests exercise actual controls and read-only runtime diagnostics. All nine release scenarios passed through actual browser input:
+Production-preview Playwright Chromium tests exercise actual controls and read-only runtime diagnostics. The original nine release scenarios passed through actual browser input:
 
 1. Start a captain, accept James's passage, jump to Arcturus, fly/dock, complete the mission, reload and continue the actual saved progress.
 2. Buy/sell cargo, browse local equipment, change rendering settings, reject malformed saves and search the source archive.
@@ -28,6 +28,10 @@ Production-preview Playwright Chromium tests exercise actual controls and read-o
 9. Import the earned Dabih checkpoint, hold and select a moving ship marker across a HUD refresh, jump to Tarazed with six named protected ships, survive physical combat, wait for every ship to arrive, land at Wayfarer and complete the convoy assignment.
 
 Staged checkpoints are generated through actual game actions; browser tests import them through the normal Options interface. Runtime diagnostics expose snapshots and telemetry, not gameplay cheat commands.
+
+The compatibility audit adds seven browser regressions: modified shortcuts/SVG activation/modal focus, persistent remapping, standard-gamepad menu/flight/disconnect handling, deferrable native dialogue, storage-denial throttling/export, graphics-loss pause/recovery, and second-finger actions with continuous held thrust. This brings the suite to **16 scenarios**. The graphics recovery check also attempts map/travel shortcuts while the device is lost and verifies that the voyage remains unchanged while export/Options remain available.
+
+The [compatibility audit](compatibility-audit.md) records the final run status, actual Chrome/Edge/Firefox/Opera/Safari versions, an 11-size responsive matrix, native mobile attempts, remaining limits and reproducible commands. Playwright engine builds and native vendor browsers are identified separately.
 
 Earlier focused browser checks also verified exact native Lost Boy boarding versus unrelated actor rejection, correct-versus-wrong cargo scan targets, unsuccessful capture preserving the actor, finite missile magazines, same-system save import resetting destroyed actors, and physical faction-specific hulks. These observations complement the checked-in regression suites; they do not assert full browser play of all 2,344 native mission definitions.
 
@@ -52,11 +56,12 @@ Both fresh imports remained responsive with enemy movement/fire and no page erro
 
 - Browser E2E tests use software Chromium, so their timing is functional evidence rather than a physical-device frame-rate claim.
 - No physical phone was available. Portrait/landscape layouts and actual browser touch dispatch were tested in emulation; physical phone thermal behavior and sustained frame rate remain unmeasured.
+- The follow-up adds native Android emulator and Apple/Windows runner checks. Their exact scope and failures are in the compatibility audit; they do not establish physical-device certification.
 - Hardware WebGPU performance was not measured. Software Vulkan proves backend rendering/behavior for the tested scene, not hardware performance or universal browser support.
 - Performance captures are finite samples on one desktop configuration. They are not an exhaustive benchmark of every possible late-game fleet, screen resolution or driver.
 - The production build reports large chunk warnings for Rapier, the universe and the full source archive. The archive/interpreter load lazily for native Contacts; all assets are local static files. Build warnings do not indicate a failed build.
 
-Run `npm ci`, `npm test`, `npx playwright install chromium`, `npm run test:e2e`, and `node scripts/verify-source.mjs`. The GitHub workflow runs the same install, model tests, production build and all nine browser checks on every push/PR. Vercel import uses the checked-in Vite/`dist` configuration and needs no secrets or provisioned backend.
+Run `npm ci`, `npm test`, `npx playwright install chromium`, `npm run test:e2e`, and `node scripts/verify-source.mjs`. The GitHub verification workflow runs the same install, model tests, production build and all 16 browser checks on main pushes and pull requests. The separate compatibility workflow covers Windows vendor browsers and native Apple automation, retaining artifacts on failure. Vercel import uses the checked-in Vite/`dist` configuration and needs no secrets or provisioned backend.
 
 ## Published deliverable
 
