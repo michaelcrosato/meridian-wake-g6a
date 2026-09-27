@@ -1,7 +1,7 @@
-import * as THREE from "three/webgpu";
-import { materialColor, normalLocal, mix, float } from "three/tsl";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { float, materialColor, mix, normalLocal } from "three/tsl";
+import * as THREE from "three/webgpu";
 
 // A restrained undercut tint gives every brick readable contact shading on both backends.
 // One shared node graph, reading each material's own color, lets every hull share a shader.
@@ -301,7 +301,7 @@ function hullGeometry(archetype) {
 	const merged = new Map();
 	for (const [key, parts] of batches) {
 		const geometry = mergeGeometries(parts);
-		parts.forEach((part) => part.dispose());
+		for (const part of parts) part.dispose();
 		geometry.userData.shared = true;
 		merged.set(key, geometry);
 	}
@@ -499,7 +499,7 @@ export function disposeObject(object) {
 				: [node.material])
 				materials.add(material);
 	});
-	geometries.forEach((geometry) => geometry.dispose());
-	materials.forEach((material) => material.dispose());
+	for (const geometry of geometries) geometry.dispose();
+	for (const material of materials) material.dispose();
 	object.removeFromParent();
 }

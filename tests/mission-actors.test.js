@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Scene } from "three/webgpu";
-import { createPhysics } from "../src/physics.js";
 import { createMissionActors } from "../src/mission-actors.js";
+import { createPhysics } from "../src/physics.js";
 
 async function fixture(limit = 12) {
 	const physics = await createPhysics({ maxBodies: 24 });

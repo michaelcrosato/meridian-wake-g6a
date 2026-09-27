@@ -696,7 +696,7 @@ test("filtered destinations vary between days but stay fixed for a listed offer"
 });
 
 test("evaded ships block completion only while they share the player's system", () => {
-	const escape = mission("Escape", [
+	const getaway = mission("Escape", [
 		n(["destination", "Destination"]),
 		n(["npc", "evade"], [n(["ship", "Sparrow", "Raider"])]),
 	]);
@@ -707,12 +707,12 @@ test("evaded ships block completion only while they share the player's system", 
 			[n(["system", "destination"]), n(["ship", "Sparrow", "Raider"])],
 		),
 	]);
-	const e = make([escape, ambush]),
+	const e = make([getaway, ambush]),
 		state = {};
 	const arrived = { ...context, planetName: "Destination", systemName: "C" };
-	e.accept(state, context, escape.name);
+	e.accept(state, context, getaway.name);
 	e.accept(state, context, ambush.name);
-	assert.equal(e.complete(state, arrived, escape.name).ok, true);
+	assert.equal(e.complete(state, arrived, getaway.name).ok, true);
 	assert.equal(e.complete(state, arrived, ambush.name).ok, false);
 	e.notify(state, arrived, {
 		type: "disable",

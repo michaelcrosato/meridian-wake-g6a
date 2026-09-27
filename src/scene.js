@@ -1,29 +1,29 @@
-import * as THREE from "three/webgpu";
+import { bloom } from "three/addons/tsl/display/BloomNode.js";
+import { ao } from "three/addons/tsl/display/GTAONode.js";
 import {
+	cameraPosition,
 	color,
 	float,
 	mix,
-	normalWorld,
 	normalLocal,
+	normalWorld,
+	pass,
 	positionLocal,
 	positionWorld,
-	cameraPosition,
+	screenUV,
 	vec3,
 	vec4,
-	pass,
-	screenUV,
 } from "three/tsl";
-import { bloom } from "three/addons/tsl/display/BloomNode.js";
-import { ao } from "three/addons/tsl/display/GTAONode.js";
-import { createPhysics, flightSpeed, preparePhysics } from "./physics.js";
-import { watchRenderHealth } from "./render-health.js";
+import * as THREE from "three/webgpu";
 import { createAsteroidField } from "./asteroid-field.js";
-import { createQualitySampler } from "./quality.js";
-import { describeLandmark, createSpecialLandmarks } from "./landmarks.js";
+import { createSpecialLandmarks, describeLandmark } from "./landmarks.js";
 import { createMissionActors } from "./mission-actors.js";
-import { createWrecks } from "./wrecks.js";
+import { createPhysics, flightSpeed, preparePhysics } from "./physics.js";
 import { guideProjectile, tryPointDefense } from "./projectiles.js";
+import { createQualitySampler } from "./quality.js";
+import { watchRenderHealth } from "./render-health.js";
 import { createShipModel, disposeObject, hullMaterial } from "./ship-model.js";
+import { createWrecks } from "./wrecks.js";
 
 const PRESETS = {
 	High: {
