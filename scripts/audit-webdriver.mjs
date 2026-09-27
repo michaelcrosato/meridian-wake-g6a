@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
-// Exercise the Apple-shipped Safari binary through its W3C WebDriver server.
+// Exercise a vendor browser through its native W3C WebDriver server.
 // This script intentionally uses actual click/key endpoints for all controls.
-const root = "http://127.0.0.1:4174";
+const browserName = process.env.WEBDRIVER_BROWSER || "safari";
+const browserLabel =
+	browserName === "firefox" ? "Mozilla Firefox Stable" : "Apple Safari";
+const root = process.env.WEBDRIVER_URL || "http://127.0.0.1:4174";
 const driverRoot = "http://127.0.0.1:4444";
-const artifacts = "artifacts/safari";
+const artifacts = process.env.WEBDRIVER_ARTIFACTS || `artifacts/${browserName}`;
 await mkdir(artifacts, { recursive: true });
 const server = spawn(
 	process.execPath,
@@ -16,21 +19,25 @@ const server = spawn(
 		"--host",
 		"127.0.0.1",
 		"--port",
-		"4174",
+		new URL(root).port || "4174",
 		"--strictPort",
 	],
 	{ stdio: ["ignore", "pipe", "pipe"] },
 );
-const driver = spawn("/usr/bin/safaridriver", ["--port", "4444"], {
-	stdio: ["ignore", "pipe", "pipe"],
-});
+const driver = spawn(
+	process.env.WEBDRIVER_EXECUTABLE || "/usr/bin/safaridriver",
+	["--port", "4444"],
+	{
+		stdio: ["ignore", "pipe", "pipe"],
+	},
+);
 const output = [];
 for (const proc of [server, driver])
 	for (const stream of [proc.stdout, proc.stderr])
 		stream.on("data", (b) => output.push(b.toString()));
 let session;
 const evidence = {
-	browser: "Apple Safari",
+	browser: browserLabel,
 	startedAt: new Date().toISOString(),
 	checks: [],
 	screens: [],
@@ -104,7 +111,18 @@ try {
 	});
 	const created = await command("/session", "POST", {
 		capabilities: {
-			alwaysMatch: { browserName: "safari", acceptInsecureCerts: false },
+			alwaysMatch: {
+				browserName,
+				...(browserName === "firefox"
+					? {
+							"moz:firefoxOptions": {
+								binary: process.env.FIREFOX_BINARY,
+								prefs: { "webgl.force-enabled": true },
+							},
+						}
+					: {}),
+				acceptInsecureCerts: false,
+			},
 		},
 	});
 	session = created.sessionId;
@@ -138,7 +156,7 @@ try {
 		await screenshot(`title-${width}x${height}`);
 	}
 	evidence.checks.push(
-		"Title renders at four actual Safari window sizes without horizontal overflow",
+		"Title renders at four actual browser window sizes without horizontal overflow",
 	);
 	await command("/window/rect", "POST", { width: 1440, height: 1000 });
 	await click('[data-action="new"]');
@@ -185,6 +203,10 @@ try {
 	evidence.checks.push(
 		"All eleven audio files decode and AudioContext resumes through actual input",
 	);
+	evidence.errorsBeforeReload = await execute(
+		"return window.auditErrors || []",
+	);
+	assert.deepEqual(evidence.errorsBeforeReload, []);
 	await command("/refresh", "POST", {});
 	await until(() => execute("return Boolean(window.meridian)"));
 	await click('[data-action="continue"]');
