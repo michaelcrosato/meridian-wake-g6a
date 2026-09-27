@@ -1,4 +1,4 @@
-/** GPL-3.0-or-later. Native source quest interpretation; see docs/source-runtime.md. */
+/** GPL-3.0-or-later. Native source quest interpretation; see docs/content.md. */
 import {
 	EXTRA_DATA,
 	MISSION_DATA,
@@ -12,6 +12,22 @@ const node = (nodes, key, second) =>
 			n.tokens[0] === key && (second === undefined || n.tokens[1] === second),
 	);
 const nodesOf = (nodes, key) => nodes.filter((n) => n.tokens[0] === key);
+const ENDPOINTS = [
+	"accept",
+	"decline",
+	"defer",
+	"die",
+	"launch",
+	"flee",
+	"depart",
+];
+// Offer endpoints as in Endless Sky: launch also accepts, depart defers and flee declines.
+export const offerDecision = (terminal) =>
+	terminal === "accept" || terminal === "launch"
+		? "accept"
+		: terminal === "defer" || terminal === "depart"
+			? "defer"
+			: "decline";
 const hash = (text) =>
 	[...String(text)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 17);
 const comparisons = {
@@ -21,6 +37,18 @@ const comparisons = {
 	"<=": (a, b) => a <= b,
 	">": (a, b) => a > b,
 	">=": (a, b) => a >= b,
+};
+// Condition assignments; ">?=" and "<?=" keep the larger or smaller value.
+const ASSIGN = {
+	"=": (_old, v) => v,
+	"+=": (old, v) => old + v,
+	"-=": (old, v) => old - v,
+	"*=": (old, v) => old * v,
+	"/=": (old, v) => (v ? Math.trunc(old / v) : 0),
+	">?=": (old, v) => Math.max(old, v),
+	"<?=": (old, v) => Math.min(old, v),
+	"++": (old) => old + 1,
+	"--": (old) => old - 1,
 };
 const operators = {
 	"+": [1, (a, b) => a + b],
@@ -87,6 +115,7 @@ export class SourceMissionEngine {
 		this.conversations = new Map(conversations.map((c) => [c.name, c]));
 		this.planetSystems = new Map();
 		this.distanceCache = new Map();
+		this.worldCache = new Map();
 		for (const s of systems)
 			for (const p of s.objects || []) this.planetSystems.set(p, s.name);
 	}
@@ -107,7 +136,7 @@ export class SourceMissionEngine {
 			dialogue: null,
 		};
 		this.root = state;
-		if (this.store !== state.sourceQuests) this.distanceCache.clear();
+		if (this.store !== state.sourceQuests) this.resetWorldCaches();
 		this.store = state.sourceQuests;
 		this.context = {
 			day: state.day || 1,
@@ -162,11 +191,16 @@ export class SourceMissionEngine {
 			return hash(`${c.day}:${c.planetName}:${this.currentId || ""}`) % 100;
 		if (key === "combat rating") return c.combatRating || 0;
 		if (key === "cargo space") return c.cargoFree;
-		if (key === "bunks") return c.bunksFree;
+		if (key === "bunks" || key === "passenger space") return c.bunksFree;
 		if (key === "day") return c.day;
+		if (key === "days since start") return c.day - 1;
 		const date = new Date(Date.UTC(3013, 10, 15 + c.day));
 		if (key === "year") return date.getUTCFullYear();
 		if (key === "month") return date.getUTCMonth() + 1;
+		if (key === "days until year end")
+			return Math.floor(
+				(Date.UTC(date.getUTCFullYear() + 1, 0, 1) - date) / 86400000,
+			);
 		if (key === "days since year start")
 			return Math.floor(
 				(date - Date.UTC(date.getUTCFullYear(), 0, 1)) / 86400000,
@@ -174,6 +208,10 @@ export class SourceMissionEngine {
 		if (key.startsWith("reputation: ")) return c.reputation[key.slice(12)] || 0;
 		if (key.startsWith("outfit (installed): "))
 			return c.outfits[key.slice(20)] || 0;
+		if (key.startsWith("outfit (flagship installed): "))
+			return c.outfits[key.slice(29)] || 0;
+		if (key.startsWith("flagship attribute: "))
+			return c.shipAttributes[key.slice(20)] || 0;
 		if (key.startsWith("outfit: ")) return c.outfits[key.slice(8)] || 0;
 		if (key.startsWith("ship attribute: "))
 			return c.shipAttributes[key.slice(16)] || 0;
@@ -190,7 +228,19 @@ export class SourceMissionEngine {
 	conditions(nodes) {
 		return evaluateConditions(nodes, (key) => this.value(key));
 	}
+	/** Call whenever world patches or the base system tables change. */
+	resetWorldCaches() {
+		this.distanceCache.clear();
+		this.worldCache.clear();
+	}
+	// Patched views are shared, read-only snapshots until the world changes.
 	worldValue(type, name) {
+		const key = `${type}:${name}`;
+		if (!this.worldCache.has(key))
+			this.worldCache.set(key, this.patchedWorldValue(type, name));
+		return this.worldCache.get(key);
+	}
+	patchedWorldValue(type, name) {
 		const original = (type === "system" ? this.systems : this.planets).get(
 			name,
 		);
@@ -331,7 +381,7 @@ export class SourceMissionEngine {
 			(!failure || !this.conditions(failure.children))
 		);
 	}
-	choosePlanet(n, origin) {
+	choosePlanet(n, origin, exclude = []) {
 		if (!n) return this.context.planetName;
 		if (n.tokens[1])
 			return n.tokens[1] === "<origin>" ? this.context.planetName : n.tokens[1];
@@ -344,7 +394,39 @@ export class SourceMissionEngine {
 					this.distance(origin, this.planetSystems.get(b.name)) ||
 				a.name.localeCompare(b.name),
 		);
-		return candidates[0]?.name;
+		// Several stops from one filter visit different places when enough match.
+		return (candidates.find((p) => !exclude.includes(p.name)) || candidates[0])
+			?.name;
+	}
+	/** "cargo random": a commodity traded at both ends, chosen deterministically. */
+	randomCommodity(id, from, to) {
+		const origin = Object.keys(this.systems.get(from)?.trade || {});
+		const destination = this.systems.get(to)?.trade || {};
+		const shared = origin.filter((name) => Object.hasOwn(destination, name));
+		const options = shared.length ? shared : origin;
+		if (!options.length) return "general cargo";
+		const name =
+			options[hash(`${id}:${this.context.day}:${from}`) % options.length];
+		return name.toLowerCase();
+	}
+	/** Endless Sky's greedy jump estimate through every waypoint and stopover. */
+	tourJumps(from, stops, destinationSystem) {
+		const pending = stops.filter(Boolean);
+		let jumps = 0;
+		while (pending.length) {
+			let best = 0;
+			for (let i = 1; i < pending.length; i++)
+				if (
+					this.distance(from, pending[i]) < this.distance(from, pending[best])
+				)
+					best = i;
+			const days = this.distance(from, pending[best]);
+			// An unreachable stop counts as -1, as in the original engine.
+			jumps += Number.isFinite(days) ? days : -1;
+			[from] = pending.splice(best, 1);
+		}
+		const last = this.distance(from, destinationSystem);
+		return jumps + (Number.isFinite(last) ? last : -1);
 	}
 	instantiate(m) {
 		const c = this.context,
@@ -359,19 +441,33 @@ export class SourceMissionEngine {
 			Math.max(0, Math.trunc(Number(n?.tokens[offset] || 0)));
 		const cargo = node(m.nodes, "cargo"),
 			passengers = node(m.nodes, "passengers");
-		const waypoints = nodesOf(m.nodes, "waypoint")
-			.map(
-				(n) =>
-					n.tokens[1] ||
-					[...this.systems.values()].find((s) =>
-						(s.objects || []).some((p) => this.matches(n.children, p)),
-					)?.name,
-			)
-			.filter(Boolean);
-		const stopovers = nodesOf(m.nodes, "stopover")
-			.map((n) => this.choosePlanet(n, c.systemName))
-			.filter(Boolean);
-		const route = this.distance(c.systemName, destinationSystem);
+		const waypoints = [];
+		const systems = [...this.systems.values()];
+		for (const n of nodesOf(m.nodes, "waypoint")) {
+			const fits = (s) =>
+				(s.objects || []).some((p) => this.matches(n.children, p));
+			// Several waypoints from one filter visit different systems when enough match.
+			const system =
+				n.tokens[1] ||
+				(
+					systems.find((s) => !waypoints.includes(s.name) && fits(s)) ||
+					systems.find(fits)
+				)?.name;
+			if (system) waypoints.push(system);
+		}
+		const stopovers = [];
+		for (const n of nodesOf(m.nodes, "stopover")) {
+			const planet = this.choosePlanet(n, c.systemName, stopovers);
+			if (planet) stopovers.push(planet);
+		}
+		const jumps = this.tourJumps(
+			c.systemName,
+			[
+				...waypoints,
+				...stopovers.map((planet) => this.planetSystems.get(planet)),
+			],
+			destinationSystem,
+		);
 		const deadlineNodes = nodesOf(m.nodes, "deadline");
 		const deadline = deadlineNodes.length
 			? c.day +
@@ -379,8 +475,7 @@ export class SourceMissionEngine {
 					(sum, n) =>
 						sum +
 						Number(n.tokens[1] || 0) +
-						(n.tokens.length === 1 ? 2 : Number(n.tokens[2] || 0)) *
-							(Number.isFinite(route) ? route : 0),
+						(n.tokens.length === 1 ? 2 : Number(n.tokens[2] || 0)) * jumps,
 					0,
 				)
 			: null;
@@ -390,8 +485,12 @@ export class SourceMissionEngine {
 			originSystem: c.systemName,
 			destination,
 			destinationSystem,
+			jumps,
 			cargo: quantity(cargo, 2),
-			cargoName: cargo?.tokens[1] || "",
+			cargoName:
+				cargo?.tokens[1] === "random"
+					? this.randomCommodity(m.name, c.systemName, destinationSystem)
+					: cargo?.tokens[1] || "",
 			passengers: quantity(passengers),
 			waypoints,
 			stopovers,
@@ -400,6 +499,8 @@ export class SourceMissionEngine {
 			deadline,
 			acceptedDay: c.day,
 			objectives: [],
+			npcShips: {},
+			npcEvents: {},
 			unsupported: [],
 			substitutions: {},
 		};
@@ -419,6 +520,7 @@ export class SourceMissionEngine {
 						0,
 					),
 			);
+			active.npcShips[`npc-${index}`] = count;
 			const systemNode = node(n.children, "system");
 			const systemName =
 				systemNode?.tokens[1] === "destination"
@@ -490,23 +592,31 @@ export class SourceMissionEngine {
 			tons: `${active.cargo} tons`,
 			bunks: String(active.passengers),
 			passengers: active.passengers === 1 ? "passenger" : "passengers",
-			fare: `${active.passengers} passengers`,
+			fare:
+				active.passengers === 1
+					? "a passenger"
+					: `${active.passengers} passengers`,
 			day: `day ${active.deadline}`,
 			date: `day ${active.deadline}`,
 			first: "Captain",
 			last: "",
 			ship: this.context.shipName || "your ship",
 			model: this.context.shipName || "your ship",
-			npc: active.objectives[0]?.shipNames[0] || "the marked vessel",
+			// Mission text usually reads "the <npc>".
+			npc: active.objectives[0]?.shipNames[0] || "marked vessel",
 			"current planet": this.context.planetName,
 			"current system": this.context.systemName,
 		};
 	}
 	text(text, active) {
-		const vars = active ? this.substitutions(active) : {};
-		return String(text || "").replace(
-			/<([^>]+)>/g,
-			(match, key) => vars[key] ?? match,
+		const source = String(text || "");
+		if (!active || !source.includes("<")) return source;
+		const vars = this.substitutions(active);
+		return source.replace(/<([^>]+)>/g, (match, key) =>
+			// The payment estimate is only computed for text that announces it.
+			key === "payment" && !Object.hasOwn(vars, key)
+				? this.paymentText(active)
+				: (vars[key] ?? match),
 		);
 	}
 	descriptor(m, a) {
@@ -585,6 +695,38 @@ export class SourceMissionEngine {
 					throw Error(`Required source outfit: ${required} × ${n.tokens[1]}.`);
 			}
 	}
+	paymentAmount(n, active) {
+		const [key, base, multiplier] = n.tokens;
+		// Saves from earlier releases lack the tour estimate.
+		const distance = active
+			? (active.jumps ??
+				this.distance(active.originSystem, active.destinationSystem))
+			: 0;
+		const payload = active ? active.cargo + 10 * active.passengers : 0;
+		return (
+			Number(base || 0) +
+			(Number.isFinite(distance) ? distance + 1 : 1) *
+				payload *
+				(n.tokens.length === 1 && key === "payment"
+					? 150
+					: Number(multiplier || 0))
+		);
+	}
+	/** The completion payment that "<payment>" announces, as Endless Sky displays it. */
+	paymentText(active) {
+		const m = this.missions.get(active.id);
+		const apparent = Number(
+			node(m?.nodes || [], "apparent payment")?.tokens[1],
+		);
+		const amount = Number.isFinite(apparent)
+			? apparent
+			: nodesOf(m?.nodes || [], "on")
+					.filter((n) => n.tokens[1] === "complete")
+					.flatMap((n) => nodesOf(n.children, "payment"))
+					.reduce((sum, n) => sum + this.paymentAmount(n, active), 0);
+		const credits = Math.abs(amount);
+		return `${credits.toLocaleString("en-US")} ${credits === 1 ? "credit" : "credits"}`;
+	}
 	actions(nodes, active) {
 		this.requirements(nodes);
 		for (const n of nodes) {
@@ -593,23 +735,10 @@ export class SourceMissionEngine {
 				this.store.conditions[a] = Number(key === "set");
 				continue;
 			}
-			if (["=", "+=", "-=", "*=", "/=", "++", "--"].includes(a)) {
+			if (Object.hasOwn(ASSIGN, a)) {
 				const old = this.value(key),
 					v = evaluateExpression(n.tokens.slice(2), (k) => this.value(k));
-				this.store.conditions[key] =
-					a === "="
-						? v
-						: a === "+="
-							? old + v
-							: a === "-="
-								? old - v
-								: a === "*="
-									? old * v
-									: a === "/="
-										? v
-											? Math.trunc(old / v)
-											: 0
-										: old + (a === "++" ? 1 : -1);
+				this.store.conditions[key] = ASSIGN[a](old, v);
 				if (key.startsWith("reputation: ")) {
 					this.context.reputation[key.slice(12)] = this.store.conditions[key];
 					this.effects.push({
@@ -622,15 +751,7 @@ export class SourceMissionEngine {
 				continue;
 			}
 			if (key === "payment" || key === "fine" || key === "debt") {
-				const distance = active
-					? this.distance(active.originSystem, active.destinationSystem)
-					: 0;
-				const payload = active ? active.cargo + 10 * active.passengers : 0;
-				const amount =
-					Number(a || 0) +
-					(Number.isFinite(distance) ? distance + 1 : 1) *
-						payload *
-						(n.tokens.length === 1 && key === "payment" ? 150 : Number(b || 0));
+				const amount = this.paymentAmount(n, active);
 				if (key === "payment" && amount < 0 && this.context.credits < -amount)
 					throw Error(`This source action requires ${-amount} credits.`);
 				if (key === "payment") this.context.credits += amount;
@@ -688,7 +809,7 @@ export class SourceMissionEngine {
 				this.store.world[
 					`${key}:${a || ""}:${Object.keys(this.store.world).length}`
 				] = n;
-				this.distanceCache.clear();
+				this.resetWorldCaches();
 				this.effects.push({ type: "world", node: n });
 				continue;
 			}
@@ -720,6 +841,52 @@ export class SourceMissionEngine {
 				this.startDialogue(conversation, m, active, phase);
 		}
 	}
+	/** Each "on enter" runs once per mission; a generic one only when no specific one runs. */
+	enter(m, a, systemName) {
+		const handlers = nodesOf(m.nodes, "on").filter(
+			(n) => n.tokens[1] === "enter",
+		);
+		a.entered ??= [];
+		const run = (n) => {
+			a.entered.push(handlers.indexOf(n));
+			this.actions(n.children, a);
+			const conversation = node(n.children, "conversation");
+			if (conversation) this.startDialogue(conversation, m, a, "enter");
+		};
+		const specific = handlers.find(
+			(n) =>
+				n.tokens[2] === systemName && !a.entered.includes(handlers.indexOf(n)),
+		);
+		if (specific) return run(specific);
+		const generic = handlers.find(
+			(n) =>
+				!n.tokens[2] &&
+				!a.entered.includes(handlers.indexOf(n)) &&
+				this.systemMatches(
+					node(n.children, "system")?.children || [],
+					systemName,
+				),
+		);
+		if (generic) run(generic);
+	}
+	systemMatches(filters, systemName) {
+		const system = this.worldValue("system", systemName);
+		if (!system) return false;
+		return filters.every((n) => {
+			const [type, ...args] = n.tokens;
+			const names = [...args, ...n.children.flatMap((c) => c.tokens)];
+			if (type === "not")
+				return !this.systemMatches(
+					n.children.length ? n.children : [{ tokens: args, children: [] }],
+					systemName,
+				);
+			if (type === "system") return names.includes(system.name);
+			if (type === "government") return names.includes(system.government);
+			if (type === "attributes")
+				return names.some((name) => (system.attributes || []).includes(name));
+			return false;
+		});
+	}
 	acceptInternal(m, a) {
 		this.capacities(a);
 		if (!this.conditions(node(m.nodes, "to", "accept")?.children || []))
@@ -729,6 +896,7 @@ export class SourceMissionEngine {
 				`This mission needs native behavior not yet connected: ${a.unsupported.join(", ")}.`,
 			);
 		this.store.active.push(a);
+		this.settleOffer(m);
 		this.store.conditions[`${m.name}: offered`] =
 			(this.value(`${m.name}: offered`) || 0) + 1;
 		this.store.conditions[`${m.name}: active`] = 1;
@@ -738,9 +906,43 @@ export class SourceMissionEngine {
 		this.processEvents();
 		return a;
 	}
+	settleOffer(m) {
+		this.store.openOffers = (this.store.openOffers || []).filter(
+			(name) => name !== m.name,
+		);
+	}
+	// Acceptance can still fail after its conversation. Undo only the attempt, and close
+	// the offer as deferred so the conversation cannot trap the player.
+	tryAccept(m, a) {
+		const store = structuredClone(this.store),
+			context = {
+				...this.context,
+				outfits: { ...this.context.outfits },
+				reputation: { ...this.context.reputation },
+			},
+			effects = this.effects.length;
+		try {
+			this.acceptInternal(m, a);
+			return null;
+		} catch (error) {
+			this.root.sourceQuests = this.store = store;
+			this.context = context;
+			this.effects.length = effects;
+			this.resetWorldCaches();
+			this.store.dialogue = null;
+			this.store.conditions[`${m.name}: deferred`] = 1;
+			return error.message;
+		}
+	}
 	offer(state, context, id) {
 		return this.run(state, context, () => {
 			const m = this.mission(id);
+			const pending = this.store.dialogue;
+			if (pending?.phase === "offer" && pending.missionId === m.name)
+				return {
+					message: "Source conversation opened.",
+					dialogue: this.dialogueView(),
+				};
 			const location =
 				[
 					"job",
@@ -756,7 +958,13 @@ export class SourceMissionEngine {
 				throw Error("Source offer conditions or location are not met.");
 			const a = this.instantiate(m);
 			this.capacities(a);
-			this.trigger(m, "offer", a);
+			// "on offer" actions run once per offer, however often its conversation is
+			// left, replaced or reopened before the player accepts, declines or defers.
+			this.store.openOffers ??= [];
+			if (!this.store.openOffers.includes(m.name)) {
+				this.trigger(m, "offer", a);
+				this.store.openOffers.push(m.name);
+			}
 			const conversation = nodesOf(m.nodes, "on")
 				.find((n) => n.tokens[1] === "offer")
 				?.children.find((n) => n.tokens[0] === "conversation");
@@ -801,21 +1009,15 @@ export class SourceMissionEngine {
 			const i = d.blocks.findIndex(
 				(n) => n.tokens[0] === "label" && n.tokens[1] === arg,
 			);
+			if (i < 0 && ENDPOINTS.includes(arg)) {
+				d.terminal = arg;
+				return true;
+			}
 			if (i < 0) throw Error(`Missing conversation label: ${arg}`);
 			d.index = i + 1;
 			return true;
 		}
-		if (
-			[
-				"accept",
-				"decline",
-				"defer",
-				"die",
-				"launch",
-				"flee",
-				"depart",
-			].includes(key)
-		) {
+		if (ENDPOINTS.includes(key)) {
 			d.terminal = key;
 			return true;
 		}
@@ -873,11 +1075,13 @@ export class SourceMissionEngine {
 				{
 					index: 0,
 					text:
-						d.terminal === "decline"
-							? "Leave"
-							: d.terminal === "accept"
+						d.phase !== "offer"
+							? "Continue"
+							: offerDecision(d.terminal) === "accept"
 								? "Accept assignment"
-								: "Continue",
+								: offerDecision(d.terminal) === "decline"
+									? "Leave"
+									: "Continue",
 					commands: [],
 					finish: true,
 				},
@@ -891,6 +1095,8 @@ export class SourceMissionEngine {
 					text: d.text.join("\n\n"),
 					options: d.options.map(({ index, text }) => ({ index, text })),
 					terminal: d.terminal,
+					accepts:
+						d.phase === "offer" && offerDecision(d.terminal) === "accept",
 				}
 			: null;
 	}
@@ -904,26 +1110,30 @@ export class SourceMissionEngine {
 				const m = this.mission(d.missionId),
 					terminal = d.terminal;
 				this.store.dialogue = null;
+				const decision = offerDecision(terminal);
 				if (d.phase === "offer") {
-					if (terminal === "accept") this.acceptInternal(m, d.active);
-					else {
-						this.trigger(
-							m,
-							terminal === "defer" ? "defer" : "decline",
-							d.active,
-						);
-						if (terminal !== "defer")
+					if (decision === "accept") {
+						const refusal = this.tryAccept(m, d.active);
+						if (refusal)
+							return {
+								message: `${refusal} The offer remains available.`,
+								dialogue: this.dialogueView(),
+							};
+					} else {
+						this.settleOffer(m);
+						this.trigger(m, decision, d.active);
+						if (decision !== "defer")
 							this.store.conditions[`${m.name}: offered`] =
 								(this.value(`${m.name}: offered`) || 0) + 1;
 						this.store.conditions[
-							`${m.name}: ${terminal === "defer" ? "deferred" : "declined"}`
+							`${m.name}: ${decision === "defer" ? "deferred" : "declined"}`
 						] = 1;
 					}
 				}
 				if (terminal === "die") this.effects.push({ type: "death" });
 				return {
 					message:
-						terminal === "accept"
+						d.phase === "offer" && decision === "accept"
 							? "Source assignment accepted."
 							: "Conversation closed.",
 					dialogue: this.dialogueView(),
@@ -936,6 +1146,28 @@ export class SourceMissionEngine {
 				dialogue: this.dialogueView(),
 			};
 		});
+	}
+	/**
+	 * As in Endless Sky, NPC actions run once every ship in the group has the event;
+	 * provoke and encounter need one ship, and any capture prevents "on destroy".
+	 */
+	npcGroupEvent(a, event) {
+		const key = `${event.npcId}:${event.type}`;
+		a.npcEvents ??= {};
+		a.npcEvents[key] ??= [];
+		const ships = a.npcEvents[key];
+		const ship = event.actorId || `event-${ships.length}`;
+		if (ships.includes(ship)) return false;
+		ships.push(ship);
+		if (event.type === "provoke" || event.type === "encounter") return true;
+		if (
+			event.type === "destroy" &&
+			a.npcEvents[`${event.npcId}:capture`]?.length
+		)
+			return false;
+		// Saves from earlier releases do not record group sizes.
+		const count = a.npcShips?.[event.npcId];
+		return count === undefined || ships.length === count;
 	}
 	ready(m, a) {
 		return (
@@ -971,28 +1203,36 @@ export class SourceMissionEngine {
 			};
 		});
 	}
-	failInternal(id, reason) {
+	failInternal(id, reason, phase = "fail") {
 		const a = this.store.active.find((a) => a.id === id);
 		if (!a) return;
 		this.store.active = this.store.active.filter((x) => x !== a);
 		this.store.conditions[`${id}: active`] = 0;
+		// As in Endless Sky, an abort also counts as a failure for older conditions.
 		this.store.conditions[`${id}: failed`] =
 			(this.value(`${id}: failed`) || 0) + 1;
+		if (phase === "abort")
+			this.store.conditions[`${id}: aborted`] =
+				(this.value(`${id}: aborted`) || 0) + 1;
 		this.store.history.push({
 			id,
 			status: "failed",
 			reason,
 			day: this.context.day,
 		});
-		this.trigger(this.mission(id), "fail", a);
+		const m = this.mission(id);
+		// "on fail" stands in only for missions without their own "on abort".
+		const hasAbort = nodesOf(m.nodes, "on").some(
+			(n) => n.tokens[1] === "abort",
+		);
+		this.trigger(m, phase === "abort" && !hasAbort ? "fail" : phase, a);
 		this.effects.push({ type: "failed", id, reason });
 	}
 	abort(state, context, id) {
 		return this.run(state, context, () => {
 			const a = this.store.active.find((a) => a.id === id);
 			if (!a) throw Error("This source mission is not active.");
-			this.trigger(this.mission(id), "abort", a);
-			this.failInternal(id, "aborted");
+			this.failInternal(id, "aborted", "abort");
 			return { message: "Source mission abandoned." };
 		});
 	}
@@ -1031,18 +1271,29 @@ export class SourceMissionEngine {
 					continue;
 				}
 				if (event.type === "enter") {
-					if (!a.visitedSystems.includes(this.context.systemName))
-						a.visitedSystems.push(this.context.systemName);
-					this.trigger(m, "enter", a, this.context.systemName);
-					if (a.waypoints.includes(this.context.systemName))
-						this.trigger(m, "waypoint", a, this.context.systemName);
+					const system = this.context.systemName;
+					const first = !a.visitedSystems.includes(system);
+					if (first) a.visitedSystems.push(system);
+					this.enter(m, a, system);
+					// "on waypoint" runs once, when the last waypoint is reached.
+					if (
+						first &&
+						a.waypoints.includes(system) &&
+						a.waypoints.every((s) => a.visitedSystems.includes(s))
+					)
+						this.trigger(m, "waypoint", a);
 				}
 				if (event.type === "land") {
-					if (!a.visitedPlanets.includes(this.context.planetName))
-						a.visitedPlanets.push(this.context.planetName);
-					this.trigger(m, "land", a, this.context.planetName);
-					if (a.stopovers.includes(this.context.planetName))
-						this.trigger(m, "stopover", a, this.context.planetName);
+					const planet = this.context.planetName;
+					const first = !a.visitedPlanets.includes(planet);
+					if (first) a.visitedPlanets.push(planet);
+					this.trigger(m, "land", a, planet);
+					if (
+						first &&
+						a.stopovers.includes(planet) &&
+						a.stopovers.every((p) => a.visitedPlanets.includes(p))
+					)
+						this.trigger(m, "stopover", a);
 				}
 				if (event.type === "daily") this.trigger(m, "daily", a);
 				if (event.missionId === a.id && event.npcId) {
@@ -1079,10 +1330,12 @@ export class SourceMissionEngine {
 							}
 						}
 					const npc = nodesOf(m.nodes, "npc")[Number(event.npcId.slice(4))];
-					for (const action of npc?.children.filter(
-						(n) => n.tokens[0] === "on" && n.tokens[1] === event.type,
-					) || [])
-						this.actions(action.children, a);
+					const handlers =
+						npc?.children.filter(
+							(n) => n.tokens[0] === "on" && n.tokens[1] === event.type,
+						) || [];
+					if (this.npcGroupEvent(a, event))
+						for (const action of handlers) this.actions(action.children, a);
 				}
 			}
 			return { message: "Source mission state updated." };

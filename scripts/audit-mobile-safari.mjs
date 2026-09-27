@@ -788,7 +788,7 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 				await waitFor(
 					() =>
 						execute(
-							"return window.meridian.audio.loaded===11&&window.meridian.audio.contextState==='running'",
+							"return window.meridian.audio.loaded===10&&window.meridian.audio.contextState==='running'",
 						),
 					"native-gesture audio activation",
 					90000,
@@ -798,7 +798,7 @@ document.addEventListener(type,e=>{if(mobileAudit.events.length<2000)mobileAudit
 				assert.deepEqual(evidence.audio.errors, []);
 				await snapshot("06-options-audio");
 				evidence.checks.push(
-					"Eleven audio buffers decode; native user input resumes AudioContext and unmutes playback",
+					"Nine effects and the selected ambience decode; native input resumes AudioContext and unmutes playback",
 				);
 				evidence.errorsBeforeReload = await execute(
 					"return mobileAudit.errors",

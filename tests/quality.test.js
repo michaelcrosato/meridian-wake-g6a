@@ -52,3 +52,50 @@ test("manual presets remain fixed even on very slow frames", () => {
 			assert.equal(sampler.observe(now, preset, preset).preset, null);
 	}
 });
+
+// Feeds frames until the first preset change, which it applies and reports.
+function run(sampler, from, to, interval, preset) {
+	for (let now = from; now < to; now += interval) {
+		const result = sampler.observe(now, "Auto", preset.current);
+		if (result.preset) {
+			preset.current = result.preset;
+			return { now, preset: result.preset };
+		}
+	}
+	return null;
+}
+
+test("Auto returns to High on a 60 Hz display once Balanced holds the display rate", () => {
+	const sampler = createQualitySampler();
+	const preset = { current: "High" };
+	assert.equal(run(sampler, 0, 9000, 40, preset)?.preset, "Balanced");
+	const frame = 1000 / 60;
+	const upgrade = run(sampler, 9000, 40000, frame, preset);
+	assert.equal(upgrade?.preset, "High");
+	assert.equal(run(sampler, upgrade.now + frame, 90000, frame, preset), null);
+	assert.equal(preset.current, "High");
+});
+
+test("Auto does not oscillate when High fails right after an upgrade, or upgrade slow steady frames", () => {
+	const sampler = createQualitySampler();
+	const preset = { current: "High" };
+	run(sampler, 0, 9000, 40, preset);
+	const upgrade = run(sampler, 9000, 40000, 1000 / 60, preset);
+	assert.equal(upgrade?.preset, "High");
+	// High is too slow from its first frames: revert once, then stay Balanced.
+	const start = upgrade.now + 30;
+	assert.equal(run(sampler, start, 80000, 30, preset)?.preset, "Balanced");
+	assert.equal(run(sampler, 80000, 200000, 1000 / 60, preset), null);
+
+	const steady = createQualitySampler();
+	const slow = { current: "Balanced" };
+	assert.equal(run(steady, 0, 60000, 30, slow), null);
+});
+
+test("Auto keeps measuring between unchanged windows", () => {
+	const sampler = createQualitySampler();
+	const preset = { current: "High" };
+	assert.equal(run(sampler, 0, 8000, 1000 / 60, preset), null);
+	// A dip shorter than the former 12-second blind period is still noticed.
+	assert.equal(run(sampler, 8000, 16000, 40, preset)?.preset, "Balanced");
+});

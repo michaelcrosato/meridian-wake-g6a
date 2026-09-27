@@ -1,6 +1,10 @@
 import { defineConfig } from "vite";
+import { dataSnapshotsPlugin } from "./scripts/data-snapshots.mjs";
+import { rapierAssetPlugin } from "./scripts/rapier-asset.mjs";
 
 export default defineConfig({
+	plugins: [dataSnapshotsPlugin(), rapierAssetPlugin()],
+	optimizeDeps: { exclude: ["@dimforge/rapier3d-compat"] },
 	build: {
 		license: { fileName: "dependency-licenses.md" },
 		rolldownOptions: {

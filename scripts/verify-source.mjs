@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import * as source from "../src/source-data.js";
 
 const catalog = JSON.parse(
@@ -67,8 +67,29 @@ assert(
 const manifest = JSON.parse(
 	await readFile("public/audio/manifest.json", "utf8"),
 );
+assert.equal(manifest.sourceCommit, source.SOURCE_COMMIT);
+assert.deepEqual(
+	(await readdir("public/audio")).sort(),
+	[
+		"manifest.json",
+		...Object.values(manifest.assets).map((asset) =>
+			asset.url.split("/").at(-1),
+		),
+	].sort(),
+	"Audio directory must contain only manifest-referenced assets",
+);
 const audio = [];
 for (const [id, asset] of Object.entries(manifest.assets)) {
+	assert.match(
+		asset.sourceSha256,
+		/^[a-f0-9]{64}$/,
+		`${id} retains original provenance`,
+	);
+	assert.ok(asset.sourceBytes > 0, `${id} records original size`);
+	assert.ok(
+		asset.url.includes(asset.sha256.slice(0, 12)),
+		`${id} URL matches its content hash`,
+	);
 	const path = `public${asset.url}`;
 	const buffer = await readFile(path);
 	assert.equal(

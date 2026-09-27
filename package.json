@@ -8,6 +8,8 @@
 		"build": "vite build",
 		"preview": "vite preview --host 0.0.0.0",
 		"test": "node --test tests/*.test.js",
+		"check:size": "node scripts/check-size.mjs",
+		"verify:source": "node scripts/verify-source.mjs",
 		"test:e2e": "npm run build && playwright test",
 		"test:compat": "npm run build && playwright test --config playwright.compat.config.js"
 	},

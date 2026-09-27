@@ -1,11 +1,43 @@
 import { OUTFITS, SHIPS } from "./content.js";
 
-const outfitById = (id) => OUTFITS.find((outfit) => outfit.id === id);
-const outfitByName = (name) => OUTFITS.find((outfit) => outfit.name === name);
+// Content is static after startup; indexes keep per-frame stat queries cheap.
+const outfitsById = new Map(OUTFITS.map((outfit) => [outfit.id, outfit]));
+const outfitsByName = new Map(OUTFITS.map((outfit) => [outfit.name, outfit]));
+const shipsById = new Map(SHIPS.map((ship) => [ship.id, ship]));
+const outfitById = (id) => outfitsById.get(id);
+const outfitByName = (name) => outfitsByName.get(name);
+// Rounds draw on a "<kind> capacity" pool. Storage racks share the Ammunition category but
+// provide that capacity, so they are installed like any other outfit.
+const capacityKey = (outfit) =>
+	outfit?.category === "Ammunition"
+		? Object.keys(outfit.sourceAttributes).find(
+				(key) => key.endsWith(" capacity") && outfit.sourceAttributes[key] < 0,
+			)
+		: undefined;
+const AMMUNITION = new Set(
+	OUTFITS.filter((outfit) => capacityKey(outfit)).map((outfit) => outfit.id),
+);
+export const isAmmunition = (outfit) => AMMUNITION.has(outfit?.id);
+const stockEquipment = new Map();
+function stockEquipmentFor(ship) {
+	let entries = stockEquipment.get(ship.id);
+	if (!entries) {
+		entries = Object.entries(ship.stockOutfits || {}).flatMap(
+			([name, count]) => {
+				const outfit = outfitByName(name);
+				return outfit && !isAmmunition(outfit)
+					? Array.from({ length: Math.min(count, 100) }, () => outfit)
+					: [];
+			},
+		);
+		stockEquipment.set(ship.id, entries);
+	}
+	return entries;
+}
 export function equipmentMethods(Game) {
 	Object.assign(Game.prototype, {
 		capability(name) {
-			const base = SHIPS.find((ship) => ship.id === this.state.shipId);
+			const base = shipsById.get(this.state.shipId);
 			return (
 				(Number(this.state.shipCapabilities?.[name]) ||
 					Number(base.sourceAttributes[name]) ||
@@ -17,50 +49,45 @@ export function equipmentMethods(Game) {
 			);
 		},
 		installedEquipment() {
-			const base = SHIPS.find((ship) => ship.id === this.state.shipId);
-			const entries = Object.entries(base.stockOutfits || {}).flatMap(
-				([name, count]) => {
-					const outfit = outfitByName(name);
-					return outfit && outfit.category !== "Ammunition"
-						? Array.from({ length: Math.min(count, 100) }, () => outfit)
-						: [];
-				},
-			);
 			return [
-				...entries,
+				...stockEquipmentFor(shipsById.get(this.state.shipId)),
 				...this.state.outfits.map(outfitById).filter(Boolean),
 			];
 		},
 		resetAmmunition() {
 			this.state.ammo = {};
 			for (const [name, count] of Object.entries(
-				SHIPS.find((ship) => ship.id === this.state.shipId).stockOutfits || {},
+				shipsById.get(this.state.shipId).stockOutfits || {},
 			)) {
 				const outfit = outfitByName(name);
-				if (outfit?.category === "Ammunition")
-					this.state.ammo[outfit.id] = count;
+				if (isAmmunition(outfit)) this.state.ammo[outfit.id] = count;
 			}
 			this.state.secondaryOutfitId = null;
 			this.state.secondaryCooldown = 0;
 		},
 		ammoCapacity(ammoId) {
-			const ammunition = outfitById(ammoId);
-			if (ammunition?.category !== "Ammunition") return 0;
-			const key = Object.keys(ammunition.sourceAttributes).find(
-				(key) =>
-					key.endsWith(" capacity") && ammunition.sourceAttributes[key] < 0,
-			);
+			const key = capacityKey(outfitById(ammoId));
+			if (!key) return 0;
 			return Math.max(
 				0,
 				Math.floor(
-					this.installedEquipment()
-						.filter((item) => item.category !== "Ammunition")
-						.reduce(
-							(sum, item) => sum + (Number(item.sourceAttributes[key]) || 0),
-							0,
-						),
+					this.installedEquipment().reduce(
+						(sum, item) => sum + (Number(item.sourceAttributes[key]) || 0),
+						0,
+					),
 				),
 			);
+		},
+		/** Rounds that still fit, counting every ammunition type sharing the same pool. */
+		ammoSpace(ammoId) {
+			const key = capacityKey(outfitById(ammoId));
+			if (!key) return 0;
+			const loaded = Object.entries(this.state.ammo || {}).reduce(
+				(sum, [id, count]) =>
+					sum + (capacityKey(outfitById(id)) === key ? Number(count) || 0 : 0),
+				0,
+			);
+			return Math.max(0, this.ammoCapacity(ammoId) - loaded);
 		},
 		secondaryWeapons() {
 			return [
@@ -139,7 +166,7 @@ export function equipmentMethods(Game) {
 			return stats.crew * (1 + Math.max(0, stats.boarding || 0) * 0.3);
 		},
 		captureRequirement(shipId = "sparrow") {
-			const ship = SHIPS.find((ship) => ship.id === shipId);
+			const ship = shipsById.get(shipId);
 			return Math.max(1, (ship?.crew || 1) * 0.75);
 		},
 		equipmentAction(action, payload) {
@@ -172,11 +199,7 @@ export function equipmentMethods(Game) {
 			if (action === "buyAmmo") {
 				const ammo = outfitById(payload.ammoId || payload.outfitId),
 					quantity = Math.floor(Number(payload.quantity ?? 1));
-				if (
-					ammo?.category !== "Ammunition" ||
-					!Number.isFinite(quantity) ||
-					quantity < 1
-				)
+				if (!isAmmunition(ammo) || !Number.isFinite(quantity) || quantity < 1)
 					return this.fail("Choose ammunition and a positive quantity.");
 				if (!this.availableOutfits().some((item) => item.id === ammo.id))
 					return this.fail("This ammunition is not sold here.");
@@ -185,9 +208,10 @@ export function equipmentMethods(Game) {
 					return this.fail(
 						"Install a compatible launcher or ammunition storage first.",
 					);
-				if ((state.ammo[ammo.id] || 0) + quantity > capacity)
+				const space = this.ammoSpace(ammo.id);
+				if (quantity > space)
 					return this.fail(
-						`Your magazines hold ${capacity} rounds of ${ammo.name}.`,
+						`Your magazines hold ${capacity} rounds and have room for ${space} more ${ammo.name}.`,
 					);
 				const cost = ammo.price * quantity;
 				if (cost > state.credits)
@@ -216,11 +240,13 @@ export function equipmentMethods(Game) {
 					return this.fail(
 						state.overheated
 							? "Weapons are overheated."
-							: state.secondaryCooldown > 0
-								? "Launcher cycling."
-								: weapon.ammoCount === 0
-									? `Out of ${weapon.ammoName}. Replenish it at an outfitter.`
-									: "Insufficient weapon energy.",
+							: state.cloaked
+								? "Weapons are offline while cloaked."
+								: state.secondaryCooldown > 0
+									? "Launcher cycling."
+									: weapon.ammoCount === 0
+										? `Out of ${weapon.ammoName}. Replenish it at an outfitter.`
+										: "Insufficient weapon energy.",
 					);
 				if (weapon.ammoId) state.ammo[weapon.ammoId]--;
 				state.energy -= weapon.energyCost;

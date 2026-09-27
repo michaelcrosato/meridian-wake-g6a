@@ -415,3 +415,262 @@ test("native map events alter source filters and routes while emitting exact hos
 	);
 	assert.equal(e.distance("A", "C"), Infinity);
 });
+
+const payments = (result) =>
+	result.effects
+		.filter((effect) => effect.type === "payment")
+		.reduce((sum, effect) => sum + effect.amount, 0);
+
+test("reopening a pending offer resumes it without repeating its on offer actions", () => {
+	const m = mission("Paid meeting", [
+		n(["destination", "Destination"]),
+		n(
+			["on", "offer"],
+			[
+				n(["payment", "700"]),
+				n(["conversation"], [n(["Welcome aboard."], [n(["accept"])])]),
+			],
+		),
+	]);
+	const other = mission("Other offer", [
+		n(["destination", "Destination"]),
+		n(["on", "offer"], [n(["conversation"], [n(["Hello."])])]),
+	]);
+	const e = make([m, other]),
+		state = {};
+	assert.equal(payments(e.offer(state, context, m.name)), 700);
+	const again = e.offer(state, context, m.name);
+	assert.equal(again.ok, true);
+	assert.equal(payments(again), 0);
+	assert.equal(again.dialogue.text, "Welcome aboard.");
+	// Another offer may replace the conversation; returning still pays nothing twice.
+	assert.equal(e.offer(state, context, other.name).dialogue.text, "Hello.");
+	assert.equal(payments(e.offer(state, context, m.name)), 0);
+	e.choose(state, context, 0);
+	assert.equal(state.sourceQuests.active.length, 1);
+});
+
+test("an offer whose acceptance fails closes as deferred instead of trapping its conversation", () => {
+	const m = mission("Licensed job", [
+		n(["destination", "Destination"]),
+		n(["to", "accept"], [n(["has", "license"])]),
+		n(
+			["on", "offer"],
+			[
+				n(["payment", "50"]),
+				n(["conversation"], [n(["Sign here."], [n(["accept"])])]),
+			],
+		),
+	]);
+	const e = make([m]),
+		state = {};
+	e.offer(state, context, m.name);
+	const refused = e.choose(state, context, 0);
+	assert.equal(refused.ok, true);
+	assert.match(refused.message, /acceptance conditions.*remains available/);
+	assert.equal(refused.dialogue, null);
+	assert.equal(state.sourceQuests.active.length, 0);
+	assert.equal(state.sourceQuests.conditions["Licensed job: deferred"], 1);
+	state.sourceQuests.conditions.license = 1;
+	assert.equal(payments(e.offer(state, context, m.name)), 0);
+	e.choose(state, context, 0);
+	assert.equal(state.sourceQuests.active.length, 1);
+});
+
+test("launch accepts and depart defers an offer, as in Endless Sky", () => {
+	const offer = (name, endpoint) =>
+		mission(name, [
+			n(["destination", "Destination"]),
+			n(
+				["on", "offer"],
+				[n(["conversation"], [n(["Ready?"], [n([endpoint])])])],
+			),
+		]);
+	const launch = offer("Launch", "launch"),
+		depart = offer("Depart", "depart");
+	const e = make([launch, depart]),
+		state = {};
+	assert.equal(e.offer(state, context, launch.name).dialogue.accepts, true);
+	e.choose(state, context, 0);
+	assert.deepEqual(
+		state.sourceQuests.active.map((active) => active.id),
+		["Launch"],
+	);
+	assert.equal(e.offer(state, context, depart.name).dialogue.accepts, false);
+	e.choose(state, context, 0);
+	assert.equal(state.sourceQuests.conditions["Depart: deferred"], 1);
+	assert.equal(state.sourceQuests.conditions["Depart: declined"], undefined);
+	assert.ok(e.available(state, context).some((m) => m.id === "Depart"));
+});
+
+test("abort runs on abort (or on fail when absent) once and records aborted and failed", () => {
+	const withAbort = mission("Secure job", [
+		n(["destination", "Destination"]),
+		n(["on", "abort"], [n(["set", "abandoned"])]),
+		n(["on", "fail"], [n(["payment", "-50"])]),
+	]);
+	const failOnly = mission("Legacy job", [
+		n(["destination", "Destination"]),
+		n(["on", "fail"], [n(["set", "legacy failure"])]),
+	]);
+	const e = make([withAbort, failOnly]),
+		state = {};
+	e.accept(state, context, withAbort.name);
+	e.accept(state, context, failOnly.name);
+	const aborted = e.abort(state, context, withAbort.name);
+	assert.equal(payments(aborted), 0);
+	const c = state.sourceQuests.conditions;
+	assert.equal(c.abandoned, 1);
+	assert.equal(c["Secure job: aborted"], 1);
+	assert.equal(c["Secure job: failed"], 1);
+	e.abort(state, context, failOnly.name);
+	assert.equal(c["legacy failure"], 1);
+	assert.equal(c["Legacy job: aborted"], 1);
+});
+
+test("on enter, waypoint and stopover actions run once, and generic entry honors its system filter", () => {
+	const m = mission("Tour", [
+		n(["destination", "Destination"]),
+		n(["waypoint", "B"]),
+		n(["waypoint", "C"]),
+		n(["on", "enter", "B"], [n(["payment", "10"])]),
+		n(
+			["on", "enter"],
+			[n(["system"], [n(["government", "Pirate"])]), n(["payment", "1000"])],
+		),
+		n(["on", "waypoint"], [n(["payment", "100"])]),
+	]);
+	const e = make([m]),
+		state = {};
+	e.accept(state, context, m.name);
+	let paid = 0;
+	for (const systemName of ["B", "A", "B", "A", "B", "C", "B", "C"])
+		paid += payments(
+			e.notify(state, { ...context, systemName }, { type: "enter" }),
+		);
+	assert.equal(paid, 110);
+});
+
+test("max/min assignments, passenger space and endpoint branches are interpreted", () => {
+	const m = mission("Operators", [
+		n(["destination", "Destination"]),
+		n(["to", "offer"], [n(["passenger space", ">=", "4"])]),
+		n(
+			["on", "accept"],
+			[
+				n(["high", "=", "3"]),
+				n(["high", ">?=", "5"]),
+				n(["low", "=", "3"]),
+				n(["low", "<?=", "2"]),
+				n(
+					["conversation"],
+					[n(["branch", "accept", "decline"], [n(["has", "high"])])],
+				),
+			],
+		),
+	]);
+	const e = make([m]),
+		state = {};
+	assert.equal(e.available(state, { ...context, bunksFree: 3 }).length, 0);
+	const result = e.accept(state, context, m.name);
+	assert.equal(result.ok, true);
+	assert.equal(state.sourceQuests.conditions.high, 5);
+	assert.equal(state.sourceQuests.conditions.low, 2);
+	assert.equal(result.dialogue.terminal, "accept");
+});
+
+test("deadlines and payment count the whole greedy tour through stopovers", () => {
+	// From A, a stop at C before landing at Stop in B is 3 jumps; the direct route is 1.
+	const m = mission("Detour", [
+		n(["destination", "Stop"]),
+		n(["stopover", "Destination"]),
+		n(["cargo", "Supplies", "2"]),
+		n(["deadline"]),
+		n(["on", "complete"], [n(["payment"])]),
+	]);
+	const e = make([m]),
+		state = {};
+	e.accept(state, context, m.name);
+	const [active] = state.sourceQuests.active;
+	assert.equal(active.jumps, 3);
+	assert.equal(active.deadline, context.day + 6);
+	for (const [systemName, planetName] of [
+		["B", null],
+		["C", "Destination"],
+		["B", "Stop"],
+	]) {
+		e.notify(state, { ...context, systemName, planetName }, { type: "enter" });
+		if (planetName)
+			e.notify(state, { ...context, systemName, planetName }, { type: "land" });
+	}
+	const result = e.complete(
+		state,
+		{ ...context, planetName: "Stop", systemName: "B", day: 5 },
+		m.name,
+	);
+	assert.equal(result.ok, true);
+	assert.equal(payments(result), 150 * 4 * 2);
+});
+
+test("NPC group actions run once every ship has the event, and a capture blocks on destroy", () => {
+	const m = mission("Two raiders", [
+		n(["destination", "Destination"]),
+		n(
+			["npc", "kill"],
+			[
+				n(["ship", "Sparrow", "First"]),
+				n(["ship", "Sparrow", "Second"]),
+				n(["on", "kill"], [n(["payment", "500"])]),
+				n(["on", "destroy"], [n(["set", "both destroyed"])]),
+			],
+		),
+	]);
+	const e = make([m]),
+		state = {};
+	e.accept(state, context, m.name);
+	const event = (type, actorId) =>
+		e.notify(state, context, {
+			type,
+			missionId: m.name,
+			npcId: "npc-0",
+			actorId,
+		});
+	event("destroy", "first");
+	assert.equal(payments(event("kill", "first")), 0);
+	assert.equal(payments(event("kill", "first")), 0);
+	event("capture", "second");
+	assert.equal(payments(event("kill", "second")), 500);
+	assert.equal(state.sourceQuests.conditions["both destroyed"], undefined);
+});
+
+test("mission text fills payment, a single fare, the marked vessel and random cargo", () => {
+	const m = mission("Wording", [
+		n(["destination", "Destination"]),
+		n(["cargo", "random", "3"]),
+		n(["passengers", "1"]),
+		n(["on", "complete"], [n(["payment", "1000", "10"])]),
+	]);
+	const e = make([m]),
+		state = {};
+	e.accept(state, context, m.name);
+	const [active] = state.sourceQuests.active;
+	assert.equal(
+		e.text("Carry <fare> and <cargo> for <payment>; avoid the <npc>.", active),
+		`Carry a passenger and 3 tons of general cargo for 1,390 credits; avoid the marked vessel.`,
+	);
+});
+
+test("stopovers drawn from one filter visit different planets when several match", () => {
+	const filter = () => n(["stopover"], [n(["attributes", "human"])]);
+	const m = mission("Circuit", [
+		n(["destination", "Destination"]),
+		filter(),
+		filter(),
+	]);
+	const e = make([m]),
+		state = {};
+	e.accept(state, context, m.name);
+	const [active] = state.sourceQuests.active;
+	assert.equal(active.stopovers.length, 2);
+	assert.equal(new Set(active.stopovers).size, 2);
+});

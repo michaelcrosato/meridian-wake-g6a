@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 
 // Exercise a vendor browser through its native W3C WebDriver server.
 // This script intentionally uses actual click/key endpoints for all controls.
@@ -196,12 +196,12 @@ try {
 	await key("\uE00C");
 	await click('.hud-nav [data-action="options"]');
 	await click('.modal [data-action="toggleMute"]');
-	await until(() => execute("return window.meridian.audio.loaded === 11"));
+	await until(() => execute("return window.meridian.audio.loaded === 10"));
 	evidence.audio = await execute("return window.meridian.audio");
 	assert.equal(evidence.audio.contextState, "running");
 	assert.deepEqual(evidence.audio.errors, []);
 	evidence.checks.push(
-		"All eleven audio files decode and AudioContext resumes through actual input",
+		"Nine effects and the selected port ambience decode; AudioContext resumes through actual input",
 	);
 	evidence.errorsBeforeReload = await execute(
 		"return window.auditErrors || []",

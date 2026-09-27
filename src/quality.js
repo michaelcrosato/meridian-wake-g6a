@@ -10,6 +10,8 @@ export function createQualitySampler() {
 	let cooldown = 0;
 	let duration = 0;
 	let samples = [];
+	let trialUpgrade = false;
+	let upgradeFailed = false;
 	function suspend() {
 		previous = null;
 		duration = 0;
@@ -20,6 +22,8 @@ export function createQualitySampler() {
 			suspend();
 			warmup = 0;
 			cooldown = 0;
+			trialUpgrade = false;
+			upgradeFailed = false;
 		},
 		suspend,
 		observe(now, quality, effective) {
@@ -47,11 +51,24 @@ export function createQualitySampler() {
 			if (duration < WINDOW_MS || samples.length < MIN_SAMPLES) return result;
 			const sorted = samples.sort((a, b) => a - b);
 			const p75 = sorted[Math.floor(sorted.length * 0.75)];
-			if (effective === "High" && p75 > 23) result.preset = "Balanced";
-			else if (effective === "Balanced" && p75 < 13) result.preset = "High";
+			// Frames never arrive faster than the display refreshes, so on a 60 Hz
+			// screen a steady display-rate window is the only visible headroom.
+			const refresh = sorted[Math.floor(sorted.length * 0.1)];
+			const displayLimited = p75 < 18 && p75 <= refresh * 1.1;
+			if (effective === "High" && p75 > 23) {
+				result.preset = "Balanced";
+				// High failed its first window after an upgrade; do not oscillate.
+				if (trialUpgrade) upgradeFailed = true;
+			} else if (
+				effective === "Balanced" &&
+				!upgradeFailed &&
+				(p75 < 13 || displayLimited)
+			)
+				result.preset = "High";
+			trialUpgrade = result.preset === "High";
 			samples = [];
 			duration = 0;
-			cooldown = COOLDOWN_MS;
+			if (result.preset) cooldown = COOLDOWN_MS;
 			return result;
 		},
 	};

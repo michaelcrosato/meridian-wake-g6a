@@ -100,3 +100,20 @@ test("captured alien technologies retain their source silhouettes under player o
 		models.forEach(disposeObject);
 	}
 });
+
+test("ships of one archetype share hull geometry that disposing a single ship keeps alive", () => {
+	const first = createShipModel("hawk", true, { faction: "Pirate" });
+	const second = createShipModel("hawk", false, { faction: "Republic" });
+	const meshes = (model) => model.children.filter((child) => child.isMesh);
+	try {
+		assert.equal(meshes(first)[0].geometry, meshes(second)[0].geometry);
+		assert.notEqual(meshes(first)[0].material, meshes(second)[0].material);
+		let disposed = 0;
+		for (const mesh of meshes(second))
+			mesh.geometry.addEventListener("dispose", () => disposed++);
+		disposeObject(first);
+		assert.equal(disposed, 0);
+	} finally {
+		disposeObject(second);
+	}
+});

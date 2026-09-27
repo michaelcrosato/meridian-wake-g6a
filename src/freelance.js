@@ -99,14 +99,25 @@ export const freelanceMethods = {
 		let destinations = this.neighbors()
 			.map((id) => this.systemById(id))
 			.filter((s) => s?.planets.some(accessible));
-		if (!destinations.length)
-			destinations = SYSTEMS.map((s) => this.systemById(s.id))
-				.filter((s) => s.id !== system.id && s.planets.some(accessible))
-				.filter((s) => {
-					const route = this.routeTo(s.id);
-					return route && route.length <= 3;
-				})
+		if (!destinations.length) {
+			// One breadth-first search finds every system within three jumps.
+			const nearby = new Set([system.id]);
+			let frontier = [system.id];
+			for (let depth = 0; depth < 3; depth++)
+				frontier = frontier.flatMap((id) =>
+					this.neighbors(id).filter((next) => {
+						if (nearby.has(next)) return false;
+						nearby.add(next);
+						return true;
+					}),
+				);
+			destinations = SYSTEMS.filter(
+				(s) => s.id !== system.id && nearby.has(s.id),
+			)
+				.map((s) => this.systemById(s.id))
+				.filter((s) => s.planets.some(accessible))
 				.slice(0, 5);
+		}
 		const region = regionFor(system, origin)?.id;
 		const [freight, issuer, brief, tons] = FREIGHT[region] || [
 			"Habitat maintenance",
