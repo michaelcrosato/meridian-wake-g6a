@@ -84,6 +84,8 @@ let sourceLoading = false;
 let sourceError = "";
 let landingReady = true;
 const controls = new InputController(settings.bindings);
+const actionTouches = new Map();
+let suppressedTouchClick = null;
 settings.bindings = controls.bindings;
 const toasts = [];
 const $ = (selector) => document.querySelector(selector);
@@ -180,6 +182,7 @@ function renderToasts() {
 }
 function clearControls() {
 	controls.clear();
+	actionTouches.clear();
 	for (const button of document.querySelectorAll("[data-hold].active"))
 		button.classList.remove("active");
 }
@@ -413,12 +416,44 @@ function modal(
 ) {
 	return `<div class="modal-backdrop"><section class="modal ${small ? "small-modal" : ""}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div><div class="eyebrow">${subtitle}</div><h2 id="modal-title">${titleText}</h2></div>${dismissible ? `<button class="close-button" data-action="close" aria-label="Close panel">${icon("close")}</button>` : ""}</header><div class="modal-body">${body}</div>${footer ? `<footer class="modal-footer">${footer}</footer>` : ""}</section></div>`;
 }
+function touchFlightContext() {
+	return !title && !panel && focusedWindow && state().mode === "flight"
+		? [
+				state().systemId,
+				state().planetName,
+				state().flightSerial,
+				state().shipId,
+			].join(":")
+		: null;
+}
 function render({ focusFirst = false, returnFocus = false } = {}) {
 	const previousFocus = focusToken(document.activeElement);
 	const scrollTop = $(".modal-body")?.scrollTop || 0;
-	// Captured pointers belong to the old nodes. Never retain a hold after a redraw.
-	controls.clearPointers();
-	app.innerHTML = `${title ? titleScreen() : hud()}${panel ? renderPanel() : ""}<div class="toast-stack" id="toasts" aria-live="polite"></div>${!ready ? '<div class="loading"><div><div class="eyebrow">Meridian Wake</div><div class="loading-orbit"></div><p id="load-message">Preparing your corner of the galaxy…</p></div></div>' : ""}`;
+	const context = touchFlightContext();
+	const touchControls = app.querySelector(".touch-controls");
+	const markup = `${title ? titleScreen() : hud()}${panel ? renderPanel() : ""}<div class="toast-stack" id="toasts" aria-live="polite"></div>${!ready ? '<div class="loading"><div><div class="eyebrow">Meridian Wake</div><div class="loading-orbit"></div><p id="load-message">Preparing your corner of the galaxy…</p></div></div>' : ""}`;
+	if (context && app.dataset.flightContext === context && touchControls) {
+		// A cloak/scan HUD refresh must not detach captured steering buttons.
+		// Keep this subtree connected throughout, replacing only its siblings.
+		const template = document.createElement("template");
+		template.innerHTML = markup;
+		for (const child of [...app.childNodes])
+			if (child !== touchControls) child.remove();
+		let beforeControls = true;
+		for (const child of [...template.content.childNodes]) {
+			if (child.nodeType === 1 && child.classList.contains("touch-controls")) {
+				beforeControls = false;
+				continue;
+			}
+			if (beforeControls) app.insertBefore(child, touchControls);
+			else app.append(child);
+		}
+	} else {
+		controls.clearPointers();
+		actionTouches.clear();
+		app.innerHTML = markup;
+	}
+	app.dataset.flightContext = context || "";
 	for (const element of app.children) {
 		if (
 			element.classList.contains("modal-backdrop") ||
@@ -1591,6 +1626,18 @@ async function handleAction(action, el) {
 app.addEventListener("click", (event) => {
 	const el = event.target.closest("[data-action]");
 	if (el) {
+		if (
+			event.isTrusted &&
+			event.detail > 0 &&
+			suppressedTouchClick &&
+			performance.now() < suppressedTouchClick.until &&
+			JSON.stringify({ ...el.dataset }) === suppressedTouchClick.key
+		) {
+			// Some browsers also emit a compatibility click for the handled tap.
+			suppressedTouchClick = null;
+			event.preventDefault();
+			return;
+		}
 		handleAction(el.dataset.action, el).catch((error) => {
 			console.error(error);
 			toast(
@@ -1730,8 +1777,28 @@ function pauseForFocusLoss() {
 }
 app.addEventListener("pointerdown", (event) => {
 	if (event.button !== 0) return;
+	// A fresh physical press is not a delayed compatibility click.
+	suppressedTouchClick = null;
 	const marker = event.target.closest(".actor-marker");
 	if (marker) marker.setPointerCapture?.(event.pointerId);
+	const action = event.target.closest("[data-action]");
+	if (
+		action &&
+		!action.disabled &&
+		event.pointerType === "touch" &&
+		!event.isPrimary &&
+		controls.pointers.size &&
+		touchFlightContext()
+	) {
+		actionTouches.set(event.pointerId, {
+			element: action,
+			context: touchFlightContext(),
+			x: event.clientX,
+			y: event.clientY,
+			moved: false,
+		});
+		action.setPointerCapture?.(event.pointerId);
+	}
 	const el = event.target.closest("[data-hold]");
 	if (!el || panel || title || state().mode !== "flight") return;
 	event.preventDefault();
@@ -1741,11 +1808,45 @@ app.addEventListener("pointerdown", (event) => {
 	if (["left", "right", "thrust", "brake", "boost"].includes(el.dataset.hold))
 		cancelApproach();
 });
+window.addEventListener(
+	"pointermove",
+	(event) => {
+		const touch = actionTouches.get(event.pointerId);
+		if (
+			touch &&
+			Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 14
+		)
+			touch.moved = true;
+	},
+	{ capture: true, passive: true },
+);
 for (const type of ["pointerup", "pointercancel", "lostpointercapture"])
 	window.addEventListener(
 		type,
 		(event) => {
 			controls.pointerUp(event.pointerId);
+			const touch = actionTouches.get(event.pointerId);
+			actionTouches.delete(event.pointerId);
+			if (
+				type === "pointerup" &&
+				touch &&
+				!touch.moved &&
+				Math.hypot(event.clientX - touch.x, event.clientY - touch.y) <= 14 &&
+				touch.context === touchFlightContext() &&
+				touch.element.isConnected &&
+				!touch.element.disabled
+			) {
+				event.preventDefault();
+				suppressedTouchClick = {
+					key: JSON.stringify({ ...touch.element.dataset }),
+					until: performance.now() + 700,
+				};
+				if (typeof touch.element.click === "function") touch.element.click();
+				else
+					touch.element.dispatchEvent(
+						new MouseEvent("click", { bubbles: true }),
+					);
+			}
 			for (const el of document.querySelectorAll("[data-hold]"))
 				el.classList.toggle(
 					"active",
