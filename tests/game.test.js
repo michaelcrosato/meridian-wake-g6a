@@ -515,7 +515,10 @@ test("fleet hiring, commands, losses and upkeep are persistent", () => {
 	assert.equal(escort.command, "attack");
 	const credits = game.state.credits;
 	game.advanceDay();
-	assert.equal(game.state.credits, credits - 90);
+	assert.equal(
+		game.state.credits,
+		credits - 90 - game.state.bank.statement.payment,
+	);
 	ok(game, "launch");
 	ok(game, "escortDamage", { escortId: escort.id, amount: 1000 });
 	assert.equal(game.state.escorts.length, 0);
@@ -743,7 +746,10 @@ test("boarding crew occupy bunks, cost wages and improve capture strength; point
 	assert.ok(game.capturePower() > strength);
 	const credits = game.state.credits;
 	game.advanceDay();
-	assert.equal(game.state.credits, credits - 30);
+	assert.equal(
+		game.state.credits,
+		credits - 30 - game.state.bank.statement.payment,
+	);
 	assert.equal(game.act("hireCrew", { count: 2 }).ok, false);
 	ok(game, "dismissCrew", { count: 2 });
 	assert.equal(game.stats().freeBunks, 3);

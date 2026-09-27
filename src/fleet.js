@@ -310,7 +310,7 @@ export function fleetMethods(Game) {
 					);
 				const value = this.parkedShipValue(record);
 				state.fleet.splice(index, 1);
-				this.earn(value);
+				this.earn(value, false);
 				this.log(
 					"Ship sold",
 					`${record.name || shipById(record.shipId).name} and its equipment sold for ${value.toLocaleString()} credits.`,

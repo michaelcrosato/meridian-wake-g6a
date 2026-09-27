@@ -1,3 +1,4 @@
+import { bankMethods, newBankAccount } from "./bank.js";
 import { campaignMethods } from "./campaign-actors.js";
 import {
 	ARCS,
@@ -12,6 +13,8 @@ import {
 } from "./content.js";
 import { equipmentMethods } from "./equipment.js";
 import { fleetMethods } from "./fleet.js";
+import { freelanceMethods } from "./freelance.js";
+import { storageMethods } from "./outfit-storage.js";
 import { applySourceEffects, sourceMethods } from "./source-bridge.js";
 import { applyStoryWorld } from "./story-world.js";
 import { UNIVERSE_FLEET_HULLS } from "./universe.js";
@@ -55,6 +58,8 @@ export class Game {
 			flagshipName: ship.name,
 			credits: 24000,
 			debt: 75000,
+			bank: newBankAccount(),
+			outfitStorage: {},
 			day: 1,
 			fuel: ship.maxFuel,
 			hull: ship.maxHull,
@@ -131,6 +136,46 @@ export class Game {
 			throw new Error("This save is not a valid Meridian Wake captain.");
 		const defaults = this.state;
 		this.state = { ...defaults, ...clone(saved) };
+		this.state.bank = { ...newBankAccount(), ...this.state.bank };
+		const bank = this.state.bank;
+		if (
+			!Number.isFinite(bank.score) ||
+			bank.score < 200 ||
+			bank.score > 800 ||
+			!Number.isFinite(bank.rate) ||
+			bank.rate < 0 ||
+			bank.rate > 0.01 ||
+			!Number.isSafeInteger(bank.term) ||
+			bank.term < 1 ||
+			bank.term > 365 ||
+			!Array.isArray(bank.income) ||
+			bank.income.some(
+				(entry) =>
+					!entry ||
+					!Number.isFinite(entry.day) ||
+					!Number.isFinite(entry.amount),
+			)
+		)
+			throw new Error("Invalid bank account in save.");
+		if (
+			!this.state.outfitStorage ||
+			Array.isArray(this.state.outfitStorage) ||
+			typeof this.state.outfitStorage !== "object"
+		)
+			throw new Error("Invalid outfit storage in save.");
+		for (const [planet, stock] of Object.entries(this.state.outfitStorage)) {
+			if (
+				!PLANETS.some((p) => p.name === planet) ||
+				!stock ||
+				typeof stock !== "object" ||
+				Array.isArray(stock) ||
+				Object.entries(stock).some(
+					([id, count]) =>
+						!byId(OUTFITS, id) || !Number.isSafeInteger(count) || count < 1,
+				)
+			)
+				throw new Error("Invalid stored outfit in save.");
+		}
 		for (const key of [
 			"credits",
 			"debt",
@@ -597,82 +642,6 @@ export class Game {
 			})
 			.filter(Boolean);
 	}
-	availableJobs() {
-		if (this.state.mode !== "port" || !this.currentSystem().inhabited)
-			return [];
-		const destinations = this.neighbors()
-			.map((id) => this.systemById(id))
-			.filter((system) => system?.inhabited);
-		const pool = destinations.length
-			? destinations
-			: SYSTEMS.filter(
-					(s) =>
-						s.inhabited &&
-						s.id !== this.state.systemId &&
-						this.routeTo(s.id)?.length <= 3,
-				).slice(0, 5);
-		return pool
-			.slice(0, 5)
-			.flatMap((target, index) => {
-				const salt = hash(
-					`${this.state.systemId}:${this.state.day}:${target.id}`,
-				);
-				return [
-					{
-						id: `freight:${this.state.systemId}:${this.state.day}:${target.id}`,
-						name: [
-							"Medical supplies",
-							"Rush machine parts",
-							"Food for the frontier",
-							"Orbital construction",
-							"Scientific instruments",
-						][index % 5],
-						description: `Deliver a sealed consignment to ${target.planet}. Cargo is reserved until delivery.`,
-						destinationId: target.id,
-						cargo: 3 + (salt % 9),
-						passengers: 0,
-						reward: 3200 + (salt % 2200),
-						deadline: this.state.day + 8,
-						kind: "delivery",
-					},
-					{
-						id: `passengers:${this.state.systemId}:${this.state.day}:${target.id}`,
-						name: [
-							"A family moving on",
-							"Engineers on rotation",
-							"Pilgrims in transit",
-							"University field team",
-							"Refugee passage",
-						][index % 5],
-						description: `Carry passengers to ${target.planet}.`,
-						destinationId: target.id,
-						cargo: 0,
-						passengers: 1 + (salt % 3),
-						reward: 2800 + (salt % 2000),
-						deadline: this.state.day + 7,
-						kind: "passengers",
-					},
-					{
-						id: `bounty:${this.state.systemId}:${this.state.day}:${target.id}`,
-						name: `Patrol ${target.name}`,
-						description: `Eliminate a pirate raider in ${target.name}, then land there to collect.`,
-						destinationId: target.id,
-						cargo: 0,
-						passengers: 0,
-						reward: 6800 + (salt % 3500),
-						deadline: this.state.day + 12,
-						kind: "bounty",
-						kills: 1,
-						progress: 0,
-					},
-				];
-			})
-			.filter(
-				(job) =>
-					!this.state.jobs.some((active) => active.id === job.id) &&
-					!this.state.completedJobs.includes(job.id),
-			);
-	}
 	describeMission(mission, active = null, arcId = null) {
 		if (!mission) return null;
 		const target = this.systemById(mission.destinationId);
@@ -833,6 +802,7 @@ export class Game {
 				(stage) =>
 					stage.sourceMissions?.includes(active.id) ||
 					(!stage.sourceMissions?.length &&
+						stage.sourceFile &&
 						stage.sourceFile === mission?.sourceFile),
 			);
 		});
@@ -864,15 +834,10 @@ export class Game {
 		this.state.debt += amount - payable;
 	}
 	advanceDay(days = 1) {
-		this.state.day += days;
-		const interest = Math.ceil(this.state.debt * 0.0008 * days);
-		this.state.debt += interest;
-		const extraCrewWages = this.state.extraCrew * 15 * days;
-		const wages =
-			this.state.escorts.filter((escort) => !escort.temporary).length *
-			90 *
-			days;
-		this.spend(wages + extraCrewWages);
+		for (let day = 0; day < days; day++) {
+			this.state.day++;
+			this.settleBankDay();
+		}
 		const expired = this.state.jobs.filter(
 			(job) => job.deadline < this.state.day,
 		);
@@ -881,17 +846,19 @@ export class Game {
 				"Contract expired",
 				`${job.name}: reserved cargo and passengers have been removed. Reputation -1.`,
 			);
-			this.state.reputation[this.currentSystem().faction] =
-				(this.state.reputation[this.currentSystem().faction] || 0) - 1;
+			const faction = job.faction || this.currentSystem().faction;
+			this.state.reputation[faction] =
+				(this.state.reputation[faction] || 0) - 1;
 		}
 		this.state.jobs = this.state.jobs.filter(
 			(job) => job.deadline >= this.state.day,
 		);
 		this.notifySource({ type: "daily" });
 	}
-	earn(amount) {
+	earn(amount, operating = true) {
 		this.state.credits += amount;
 		this.state.earnings += amount;
+		if (operating) this.recordIncome(amount);
 	}
 	activeMissions() {
 		return [this.state.activeStory, ...this.state.activeArcs]
@@ -1236,6 +1203,9 @@ export class Game {
 			);
 		if (portActions.includes(action) && state.mode !== "port")
 			return this.fail("Land at a spaceport first.");
+		if (action === "borrow") return this.borrow(Number(payload.amount));
+		const storageResult = this.storageAction(action, payload.outfitId);
+		if (storageResult) return storageResult;
 		const fleetResult = this.fleetAction(action, payload);
 		if (fleetResult) return fleetResult;
 		const equipmentResult = this.equipmentAction(action, payload);
@@ -1347,21 +1317,8 @@ export class Game {
 			state.energy = this.stats().maxEnergy;
 			state.heat = 0;
 			state.overheated = false;
-			const delivered = state.jobs.filter(
-				(job) =>
-					job.destinationId === state.systemId &&
-					(job.kind !== "bounty" || job.progress >= job.kills),
-			);
-			for (const job of delivered) {
-				this.earn(job.reward);
-				state.completedJobs.push(job.id);
-				this.log(
-					"Contract complete",
-					`${job.name}: ${job.reward.toLocaleString()} credits earned.`,
-				);
-			}
-			state.jobs = state.jobs.filter((job) => !delivered.includes(job));
-			state.completedJobs = state.completedJobs.slice(-300);
+			this.trackJobVisit("land");
+			const delivered = this.settleJobs();
 			return this.success(
 				`Landed on ${this.currentSystem().planet}.${inhabited ? ` Fuel ${fuelCost} · repairs ${repairCost} credits.` : " No spaceport services."}${delivered.length ? ` ${delivered.length} contract${delivered.length > 1 ? "s" : ""} paid.` : ""}`,
 				{ delivered: delivered.length },
@@ -1454,7 +1411,7 @@ export class Game {
 				return this.fail(`You need ${job.passengers} free bunks.`);
 			state.jobs.push(clone(job));
 			return this.success(
-				`${job.name} accepted. Deliver by day ${job.deadline}.`,
+				`${job.name} accepted. ${this.jobObjective(job)}. Due day ${job.deadline}.`,
 			);
 		}
 		if (action === "abandonJob") {
@@ -1482,6 +1439,7 @@ export class Game {
 				if (state.credits < cost)
 					return this.fail("You do not have enough credits.");
 				state.credits -= cost;
+				this.recordIncome(-cost);
 				state.cargo[commodity.id] = (state.cargo[commodity.id] || 0) + quantity;
 				return this.success(
 					`Purchased ${quantity} tons of ${commodity.name} for ${cost.toLocaleString()} credits.`,
@@ -1636,22 +1594,10 @@ export class Game {
 				index = state.outfits.indexOf(payload.outfitId);
 			if (!outfit || index < 0)
 				return this.fail("That outfit is not installed.");
-			if (
-				outfit.category === "Unique" &&
-				outfit.sourceAttributes.installable < 0
-			)
-				return this.fail(
-					"This specialized system can only be removed by its mission engineers.",
-				);
-			if (
-				this.stats().freeCargo < (outfit.effects?.cargoCapacity || 0) ||
-				this.stats().freeBunks < (outfit.effects?.passengerCapacity || 0)
-			)
-				return this.fail(
-					"Unload the extra cargo or passengers before removing this outfit.",
-				);
+			const error = this.outfitRemovalError(outfit);
+			if (error) return this.fail(error);
 			state.outfits.splice(index, 1);
-			this.earn(Math.floor(outfit.price * 0.7));
+			this.earn(Math.floor(outfit.price * 0.7), false);
 			state.hull = Math.min(state.hull, this.stats().maxHull);
 			state.shield = Math.min(state.shield, this.stats().maxShield);
 			state.fuel = Math.min(state.fuel, this.stats().maxFuel);
@@ -1734,7 +1680,7 @@ export class Game {
 					"This is an owned ship. Park it in your hangar to sell it at its proper value.",
 				);
 			const [escort] = state.escorts.splice(index, 1);
-			this.earn(escort.bond || 5000);
+			this.earn(escort.bond || 5000, false);
 			return this.success(
 				`${escort.name} released. 5,000 credit bond returned.`,
 			);
@@ -2013,6 +1959,7 @@ export class Game {
 		}
 		if (action === "scan") {
 			if (state.mode !== "flight") return this.fail("Launch before scanning.");
+			this.trackJobVisit("scan");
 			for (const { active, definition } of this.activeMissions()) {
 				if (definition.destinationId === state.systemId) active.scanned = true;
 				if (
@@ -2262,3 +2209,7 @@ equipmentMethods(Game);
 fleetMethods(Game);
 
 campaignMethods(Game);
+
+Object.assign(Game.prototype, freelanceMethods);
+
+Object.assign(Game.prototype, bankMethods, storageMethods);
