@@ -1466,6 +1466,9 @@ app.addEventListener("input", (event) => {
 	}
 });
 app.addEventListener("pointerdown", (event) => {
+	// Keep the release attached to the selected contact as the world moves.
+	const marker = event.target.closest(".actor-marker");
+	if (marker) marker.setPointerCapture?.(event.pointerId);
 	const el = event.target.closest("[data-hold]");
 	if (el) {
 		event.preventDefault();

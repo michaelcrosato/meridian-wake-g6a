@@ -467,6 +467,16 @@ test("six protected source ships survive the final convoy jump and physically ar
 			page.evaluate(() => window.meridian.telemetry.missionActors.length),
 		)
 		.toBe(6);
+	const contact = page
+		.locator(".actor-marker")
+		.filter({ hasText: "F.S. Franklin" });
+	await expect(contact).toBeVisible();
+	const rect = await contact.boundingBox();
+	await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+	await page.mouse.down();
+	await page.waitForTimeout(300); // Deliberate held click across a HUD refresh.
+	await page.mouse.up();
+	await expect(contact).toHaveClass(/selected/);
 	await page.keyboard.press("m");
 	await page.locator("#system-search").fill("Tarazed");
 	await page.locator("#system-search").press("Tab");

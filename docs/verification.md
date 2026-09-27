@@ -25,7 +25,7 @@ Production-preview Playwright Chromium tests exercise actual controls and read-o
 7. Landscape touch steering, thrust and firing with three simultaneous touch contacts; verify release and cancellation, visibility of boost/secondary/cloak and no horizontal overflow.
 
 8. Import the earned Algenib checkpoint, evade incoming fire, engage the fitted cloak, consume fuel and power, remain cloaked for the actual eight-second objective, land and complete the operation. Existing projectiles can break the cloak; the flight test evades and re-engages it if necessary.
-9. Import the earned Dabih checkpoint, jump to Tarazed with six named protected ships, survive physical combat, wait for every ship to arrive, land at Wayfarer and complete the convoy assignment.
+9. Import the earned Dabih checkpoint, hold and select a moving ship marker across a HUD refresh, jump to Tarazed with six named protected ships, survive physical combat, wait for every ship to arrive, land at Wayfarer and complete the convoy assignment.
 
 Staged checkpoints are generated through actual game actions; browser tests import them through the normal Options interface. Runtime diagnostics expose snapshots and telemetry, not gameplay cheat commands.
 
