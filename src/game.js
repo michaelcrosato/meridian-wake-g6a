@@ -194,12 +194,16 @@ export class Game {
 				!stock ||
 				typeof stock !== "object" ||
 				Array.isArray(stock) ||
-				Object.entries(stock).some(
-					([id, count]) =>
-						!byId(OUTFITS, id) || !Number.isSafeInteger(count) || count < 1,
+				Object.values(stock).some(
+					(count) => !Number.isSafeInteger(count) || count < 1,
 				)
 			)
 				throw new Error("Invalid stored outfit in save.");
+			// Like installed outfits, stock removed by a data update is dropped rather than
+			// making the whole save unreadable.
+			for (const id of Object.keys(stock))
+				if (!byId(OUTFITS, id)) delete stock[id];
+			if (!Object.keys(stock).length) delete this.state.outfitStorage[planet];
 		}
 		for (const key of [
 			"credits",
@@ -400,36 +404,20 @@ export class Game {
 		result.freeBunks = result.passengerCapacity - result.passengersUsed;
 		result.maxEnergy = Math.max(30, result.energy);
 		result.maxHeat = Math.max(30, result.heat);
-		result.energyRegen =
-			8 +
-			this.state.outfits.reduce(
-				(sum, id) =>
+		// Built-in reactors and coolers count as much as purchased ones.
+		const equipment = this.installedEquipment();
+		const rate = (attribute) =>
+			equipment.reduce(
+				(sum, outfit) =>
 					sum +
 					Math.sqrt(
-						Math.max(
-							0,
-							Number(
-								byId(OUTFITS, id)?.sourceAttributes?.["energy generation"],
-							) || 0,
-						),
+						Math.max(0, Number(outfit.sourceAttributes?.[attribute]) || 0),
 					) *
 						2,
 				0,
 			);
-		result.cooling =
-			12 +
-			this.state.outfits.reduce(
-				(sum, id) =>
-					sum +
-					Math.sqrt(
-						Math.max(
-							0,
-							Number(byId(OUTFITS, id)?.sourceAttributes?.cooling) || 0,
-						),
-					) *
-						2,
-				0,
-			);
+		result.energyRegen = 8 + rate("energy generation");
+		result.cooling = 12 + rate("cooling");
 		result.energyCost = Math.max(1, result.damage * 0.08);
 		result.shotHeat = Math.max(1, result.damage * 0.1);
 		result.canFire =

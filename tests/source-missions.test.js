@@ -674,3 +674,51 @@ test("stopovers drawn from one filter visit different planets when several match
 	assert.equal(active.stopovers.length, 2);
 	assert.equal(new Set(active.stopovers).size, 2);
 });
+
+test("filtered destinations vary between days but stay fixed for a listed offer", () => {
+	const m = mission("Errand", [
+		n(
+			["destination"],
+			[n(["attributes", "human"]), n(["not", "planet", "Home"])],
+		),
+	]);
+	const e = make([m]);
+	const chosen = new Set();
+	for (let day = 1; day <= 12; day++) {
+		const state = {},
+			today = { ...context, day };
+		const [listed] = e.available(state, today);
+		chosen.add(listed.destination);
+		e.accept(state, today, m.name);
+		assert.equal(state.sourceQuests.active[0].destination, listed.destination);
+	}
+	assert.deepEqual([...chosen].sort(), ["Destination", "Stop"]);
+});
+
+test("evaded ships block completion only while they share the player's system", () => {
+	const escape = mission("Escape", [
+		n(["destination", "Destination"]),
+		n(["npc", "evade"], [n(["ship", "Sparrow", "Raider"])]),
+	]);
+	const ambush = mission("Ambush", [
+		n(["destination", "Destination"]),
+		n(
+			["npc", "evade"],
+			[n(["system", "destination"]), n(["ship", "Sparrow", "Raider"])],
+		),
+	]);
+	const e = make([escape, ambush]),
+		state = {};
+	const arrived = { ...context, planetName: "Destination", systemName: "C" };
+	e.accept(state, context, escape.name);
+	e.accept(state, context, ambush.name);
+	assert.equal(e.complete(state, arrived, escape.name).ok, true);
+	assert.equal(e.complete(state, arrived, ambush.name).ok, false);
+	e.notify(state, arrived, {
+		type: "disable",
+		missionId: ambush.name,
+		npcId: "npc-0",
+		actorId: "raider",
+	});
+	assert.equal(e.complete(state, arrived, ambush.name).ok, true);
+});
