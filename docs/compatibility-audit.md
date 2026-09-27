@@ -4,6 +4,8 @@ Audit dates: **26–27 September 2026, America/Vancouver**. Baseline: `de17cab`.
 
 Validation: **155/155 node tests**, **16/16 Chromium browser scenarios**, production build and source/audio verification pass locally. The [full GitHub regression run](https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36302198733) also passed all 155 node tests and all 16 browser scenarios on application revision `1557c39`, including the final graphics-recovery guard. Later report or test-harness changes are identified separately; they do not alter the application.
 
+One intervening CI run exposed stale coordinates in the convoy test: separate bounding-box and mouse-movement commands took approximately 5.6 seconds, so the moving target was missed before pointer-down. The final test uses a single held locator click and additionally verifies trusted target acquisition, native pointer capture through release, the same connected node and an actual HUD mutation during the hold. Selection and all six physical arrivals/completion remain required. The strengthened scenario passed normally (29.1 seconds) and with deliberate 500ms automation delay (37.3 seconds), without production changes or removed assertions.
+
 ## Browser selection and results
 
 Chrome, Safari, Edge, Firefox and Opera together represented 95.5% of worldwide browser usage in the August 2026 [Statcounter monthly sample](https://gs.statcounter.com/browser-market-share/monthly). That motivated browser selection; testing a desktop brand does **not** establish coverage of its entire mobile share. Samsung Internet (2.01% in that sample) remains an explicit untested vendor browser.
