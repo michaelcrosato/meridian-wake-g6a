@@ -1,0 +1,43 @@
+{
+  "run": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301252982",
+  "sourceCommit": "71e35e9d5c569a42301707814eaf90b01bbbc50b",
+  "classification": "Cumulative viewport-test timeout; no failed control or layout assertion before cancellation.",
+  "test": "title, menus, map and flight remain reachable across common CSS viewport sizes",
+  "previousTotalBudgetSeconds": 300,
+  "revisedTotalBudgetSeconds": 480,
+  "assertionsAndRetriesUnchanged": true,
+  "evidence": [
+    {
+      "browser": "Chrome 153.0.8010.53 on Windows",
+      "job": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301252982/job/108569181916",
+      "artifact": "windows-chrome-compatibility",
+      "backend": "WebGL2",
+      "completedTitleViewports": 11,
+      "completedPortViewports": 11,
+      "completedFlightLayoutChecksAndScreenshots": 9,
+      "completedMapSearchAndJumpButtonChecks": 8,
+      "viewportAtCancellation": [2560, 1080],
+      "previousSuccessfulMapClickSeconds": 7.45,
+      "finalMapClickSecondsBeforeGlobalCancellation": 6.04,
+      "finalFlightScreenshot": "chrome/flight-2560x1080.png",
+      "finalFlightScreenshotFrameTimeMs": 705.1,
+      "otherSuiteScenarios": "Opening voyage/economy/audio/save and keyboard/modal controls passed."
+    },
+    {
+      "browser": "Edge 153.0.4234.48 on Windows",
+      "job": "https://github.com/michaelcrosato/meridian-wake-g6a/actions/runs/36301252982/job/108569181890",
+      "artifact": "windows-edge-compatibility",
+      "backend": "WebGL2",
+      "completedTitleViewports": 11,
+      "completedPortViewports": 11,
+      "completedFlightLayoutChecksAndScreenshots": 9,
+      "completedMapSearchAndJumpButtonChecks": 8,
+      "viewportAtCancellation": [2560, 1080],
+      "previousSuccessfulMapClickSeconds": 7.03,
+      "finalMapClickSecondsBeforeGlobalCancellation": 3.4,
+      "finalFlightScreenshot": "edge/flight-2560x1080.png",
+      "otherSuiteScenarios": "Opening voyage/economy/audio/save and keyboard/modal controls passed."
+    }
+  ],
+  "interpretation": "The loop reached its ninth flight viewport after completing all title and port sizes. The map button passed the existing center-hit checks at the final viewport; the shared deadline then interrupted its click. Previous successful map clicks took longer than the remaining budget. Raising only the total loop allowance preserves every control, geometry, overlap, search and jump-button assertion. This diagnosis does not establish hardware-GPU performance."
+}

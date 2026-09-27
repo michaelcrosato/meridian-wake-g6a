@@ -175,7 +175,8 @@ test("complete opening voyage, economy, audio and persisted progress across this
 test("title, menus, map and flight remain reachable across common CSS viewport sizes", async ({
 	page,
 }) => {
-	test.setTimeout(300000);
+	// Eleven title/port/flight viewports need extra total time on software-GPU CI.
+	test.setTimeout(480000);
 	await setup(page);
 	const measurements = [];
 	for (const [width, height] of sizes) {
