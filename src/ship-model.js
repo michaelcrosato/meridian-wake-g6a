@@ -1,7 +1,13 @@
 import * as THREE from "three/webgpu";
-import { color, normalLocal, mix, float } from "three/tsl";
+import { materialColor, normalLocal, mix, float } from "three/tsl";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+
+// A restrained undercut tint gives every brick readable contact shading on both backends.
+// One shared node graph, reading each material's own color, lets every hull share a shader.
+const hullColorNode = materialColor.mul(
+	mix(float(0.69), float(1), normalLocal.y.mul(0.5).add(0.5)),
+);
 
 export function hullMaterial(hex, roughness = 0.48, metalness = 0.16) {
 	const material = new THREE.MeshStandardNodeMaterial({
@@ -9,10 +15,7 @@ export function hullMaterial(hex, roughness = 0.48, metalness = 0.16) {
 		roughness,
 		metalness,
 	});
-	// A restrained undercut tint gives every brick readable contact shading on both backends.
-	material.colorNode = color(hex).mul(
-		mix(float(0.69), float(1), normalLocal.y.mul(0.5).add(0.5)),
-	);
+	material.colorNode = hullColorNode;
 	return material;
 }
 
@@ -75,131 +78,13 @@ export function shipArchetype(id = "sparrow", style = {}) {
 	return "sparrow";
 }
 
-/** Original, batched toy-brick geometry; no downloaded ship art. Nose faces local -Z. */
-export function createShipModel(id = "sparrow", hostile = false, style = {}) {
-	const group = new THREE.Group();
-	const archetype = shipArchetype(id, style);
+// Hull geometry depends only on the archetype, so every ship of a kind shares it.
+// Shared geometry is marked so that disposing one ship leaves the others intact.
+const archetypeGeometry = new Map();
+function hullGeometry(archetype) {
+	if (archetypeGeometry.has(archetype)) return archetypeGeometry.get(archetype);
 	const heavy = archetype === "heavy";
 	const nimble = archetype === "interceptor";
-	const faction = String(
-		lineage(id) || style.faction || (hostile ? "Pirate" : "Independent"),
-	);
-	let hull = hostile ? 0x935348 : 0xeee7d4;
-	let top = hostile ? 0xc37659 : 0xfff8e8;
-	let accent = hostile
-		? 0x292f37
-		: archetype === "cargo"
-			? 0xb07c40
-			: archetype === "shuttle"
-				? 0x527597
-				: 0x2f727a;
-	let light = hostile ? 0xffad76 : 0x97faf0;
-	if (/republic|navy/i.test(faction)) {
-		hull = 0x8c9cab;
-		top = 0xe0e8e3;
-		accent = 0x2d455e;
-		light = 0x85c7ff;
-	}
-	if (/syndicate/i.test(faction)) {
-		hull = 0x6f7172;
-		top = 0xabad9d;
-		accent = 0x9d5b42;
-		light = 0xffd397;
-	}
-	if (/hai|unfettered/i.test(faction)) {
-		hull = 0x748d65;
-		top = 0xc3bf83;
-		accent = 0x384949;
-		light = 0xd4ff9d;
-	}
-	if (/korath/i.test(faction)) {
-		hull = 0x9a6240;
-		top = 0xc49557;
-		accent = 0x305e62;
-		light = 0x80f5e5;
-	}
-	if (/pug|remnant/i.test(faction)) {
-		hull = 0x9b9dbb;
-		top = 0xe4e0db;
-		accent = 0x625774;
-		light = 0xdbb2ff;
-	}
-	if (/quarg|coalition/i.test(faction)) {
-		hull = 0xc2b987;
-		top = 0xf2e8c3;
-		accent = 0x787953;
-		light = 0xfff3a0;
-	}
-	if (/wanderer/i.test(faction)) {
-		hull = 0x6e9e98;
-		top = 0xc6d9bc;
-		accent = 0xb38655;
-		light = 0xb6ffdb;
-	}
-	if (/mereti/i.test(faction)) {
-		hull = 0x65798b;
-		top = 0xb1cbd3;
-		accent = 0x394159;
-		light = 0x9fc4ff;
-	}
-	if (/sestor/i.test(faction)) {
-		hull = 0x94674c;
-		top = 0xd8a477;
-		accent = 0x4a393b;
-		light = 0xff8e71;
-	}
-	if (/aberrant/i.test(faction)) {
-		hull = 0x756d84;
-		top = 0xbaabb6;
-		accent = 0x524a6e;
-		light = 0xc7ff9e;
-	}
-	if (/alpha/i.test(faction)) {
-		hull = 0x747b83;
-		top = 0xc4c8c2;
-		accent = 0x7c3034;
-		light = 0xff786e;
-	}
-	if (/solitude/i.test(faction)) {
-		hull = 0x516e86;
-		top = 0xb8d5dc;
-		accent = 0x32414c;
-		light = 0x81f1ff;
-	}
-	if (/high houses|^house\s/i.test(faction)) {
-		hull = 0x9e866a;
-		top = 0xe9deba;
-		accent = 0x54465e;
-		light = 0xf7d587;
-	}
-	if (/bounty hunter/i.test(faction)) {
-		hull = 0x5f7772;
-		top = 0xc7d2bd;
-		accent = 0xc18b47;
-		light = 0x87dec4;
-	}
-	if (/lunarium/i.test(faction)) {
-		hull = 0x637c7e;
-		top = 0xcbd1cb;
-		accent = 0x526457;
-		light = 0xbcfce4;
-	}
-
-	const materials = {
-		ivory: hullMaterial(hull),
-		white: hullMaterial(top),
-		teal: hullMaterial(accent, 0.34, 0.35),
-		dark: hullMaterial(0x202d35, 0.58, 0.4),
-		copper: hullMaterial(0xc99451, 0.35, 0.45),
-		glass: new THREE.MeshStandardNodeMaterial({
-			color: hostile ? 0x412e28 : 0x153c47,
-			metalness: 0.64,
-			roughness: 0.2,
-			emissive: light,
-			emissiveIntensity: 0.17,
-		}),
-		glow: new THREE.MeshBasicNodeMaterial({ color: light }),
-	};
 	let engineX = 1.23,
 		engineZ = 2.05;
 	const batches = new Map();
@@ -413,9 +298,155 @@ export function createShipModel(id = "sparrow", hostile = false, style = {}) {
 			brick("white", 0, 0.2, -2.03, 0.61, 0.41, 1.17, true);
 		}
 	}
+	const merged = new Map();
 	for (const [key, parts] of batches) {
 		const geometry = mergeGeometries(parts);
 		parts.forEach((part) => part.dispose());
+		geometry.userData.shared = true;
+		merged.set(key, geometry);
+	}
+	const result = { batches: merged, engineX, engineZ };
+	archetypeGeometry.set(archetype, result);
+	return result;
+}
+let exhaustGeometry;
+function sharedExhaustGeometry() {
+	exhaustGeometry ??= {
+		plume: new THREE.ConeGeometry(0.24, 1.7, 8),
+		core: new THREE.CylinderGeometry(0.17, 0.19, 0.35, 10),
+	};
+	exhaustGeometry.plume.userData.shared = true;
+	exhaustGeometry.core.userData.shared = true;
+	return exhaustGeometry;
+}
+
+/** Original, batched toy-brick geometry; no downloaded ship art. Nose faces local -Z. */
+export function createShipModel(id = "sparrow", hostile = false, style = {}) {
+	const group = new THREE.Group();
+	const archetype = shipArchetype(id, style);
+	const heavy = archetype === "heavy";
+	const nimble = archetype === "interceptor";
+	const faction = String(
+		lineage(id) || style.faction || (hostile ? "Pirate" : "Independent"),
+	);
+	let hull = hostile ? 0x935348 : 0xeee7d4;
+	let top = hostile ? 0xc37659 : 0xfff8e8;
+	let accent = hostile
+		? 0x292f37
+		: archetype === "cargo"
+			? 0xb07c40
+			: archetype === "shuttle"
+				? 0x527597
+				: 0x2f727a;
+	let light = hostile ? 0xffad76 : 0x97faf0;
+	if (/republic|navy/i.test(faction)) {
+		hull = 0x8c9cab;
+		top = 0xe0e8e3;
+		accent = 0x2d455e;
+		light = 0x85c7ff;
+	}
+	if (/syndicate/i.test(faction)) {
+		hull = 0x6f7172;
+		top = 0xabad9d;
+		accent = 0x9d5b42;
+		light = 0xffd397;
+	}
+	if (/hai|unfettered/i.test(faction)) {
+		hull = 0x748d65;
+		top = 0xc3bf83;
+		accent = 0x384949;
+		light = 0xd4ff9d;
+	}
+	if (/korath/i.test(faction)) {
+		hull = 0x9a6240;
+		top = 0xc49557;
+		accent = 0x305e62;
+		light = 0x80f5e5;
+	}
+	if (/pug|remnant/i.test(faction)) {
+		hull = 0x9b9dbb;
+		top = 0xe4e0db;
+		accent = 0x625774;
+		light = 0xdbb2ff;
+	}
+	if (/quarg|coalition/i.test(faction)) {
+		hull = 0xc2b987;
+		top = 0xf2e8c3;
+		accent = 0x787953;
+		light = 0xfff3a0;
+	}
+	if (/wanderer/i.test(faction)) {
+		hull = 0x6e9e98;
+		top = 0xc6d9bc;
+		accent = 0xb38655;
+		light = 0xb6ffdb;
+	}
+	if (/mereti/i.test(faction)) {
+		hull = 0x65798b;
+		top = 0xb1cbd3;
+		accent = 0x394159;
+		light = 0x9fc4ff;
+	}
+	if (/sestor/i.test(faction)) {
+		hull = 0x94674c;
+		top = 0xd8a477;
+		accent = 0x4a393b;
+		light = 0xff8e71;
+	}
+	if (/aberrant/i.test(faction)) {
+		hull = 0x756d84;
+		top = 0xbaabb6;
+		accent = 0x524a6e;
+		light = 0xc7ff9e;
+	}
+	if (/alpha/i.test(faction)) {
+		hull = 0x747b83;
+		top = 0xc4c8c2;
+		accent = 0x7c3034;
+		light = 0xff786e;
+	}
+	if (/solitude/i.test(faction)) {
+		hull = 0x516e86;
+		top = 0xb8d5dc;
+		accent = 0x32414c;
+		light = 0x81f1ff;
+	}
+	if (/high houses|^house\s/i.test(faction)) {
+		hull = 0x9e866a;
+		top = 0xe9deba;
+		accent = 0x54465e;
+		light = 0xf7d587;
+	}
+	if (/bounty hunter/i.test(faction)) {
+		hull = 0x5f7772;
+		top = 0xc7d2bd;
+		accent = 0xc18b47;
+		light = 0x87dec4;
+	}
+	if (/lunarium/i.test(faction)) {
+		hull = 0x637c7e;
+		top = 0xcbd1cb;
+		accent = 0x526457;
+		light = 0xbcfce4;
+	}
+
+	const materials = {
+		ivory: hullMaterial(hull),
+		white: hullMaterial(top),
+		teal: hullMaterial(accent, 0.34, 0.35),
+		dark: hullMaterial(0x202d35, 0.58, 0.4),
+		copper: hullMaterial(0xc99451, 0.35, 0.45),
+		glass: new THREE.MeshStandardNodeMaterial({
+			color: hostile ? 0x412e28 : 0x153c47,
+			metalness: 0.64,
+			roughness: 0.2,
+			emissive: light,
+			emissiveIntensity: 0.17,
+		}),
+		glow: new THREE.MeshBasicNodeMaterial({ color: light }),
+	};
+	const { batches, engineX, engineZ } = hullGeometry(archetype);
+	for (const [key, geometry] of batches) {
 		const mesh = new THREE.Mesh(geometry, materials[key]);
 		mesh.castShadow = true;
 		mesh.receiveShadow = true;
@@ -430,18 +461,13 @@ export function createShipModel(id = "sparrow", hostile = false, style = {}) {
 		depthWrite: false,
 	});
 	const coreMaterial = new THREE.MeshBasicNodeMaterial({ color: 0xfff2d0 });
+	const exhaustParts = sharedExhaustGeometry();
 	for (const side of [-1, 1]) {
-		const plume = new THREE.Mesh(
-			new THREE.ConeGeometry(0.24, 1.7, 8),
-			plumeMaterial,
-		);
+		const plume = new THREE.Mesh(exhaustParts.plume, plumeMaterial);
 		plume.rotation.x = Math.PI / 2;
 		plume.position.set(side * engineX, 0.1, 0.7);
 		exhaust.add(plume);
-		const core = new THREE.Mesh(
-			new THREE.CylinderGeometry(0.17, 0.19, 0.35, 10),
-			coreMaterial,
-		);
+		const core = new THREE.Mesh(exhaustParts.core, coreMaterial);
 		core.rotation.x = Math.PI / 2;
 		core.position.set(side * engineX, 0.1, engineZ + 0.05);
 		group.add(core);
@@ -465,7 +491,8 @@ export function disposeObject(object) {
 	const geometries = new Set();
 	const materials = new Set();
 	object.traverse((node) => {
-		if (node.geometry) geometries.add(node.geometry);
+		if (node.geometry && !node.geometry.userData.shared)
+			geometries.add(node.geometry);
 		if (node.material)
 			for (const material of Array.isArray(node.material)
 				? node.material

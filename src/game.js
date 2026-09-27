@@ -11,7 +11,7 @@ import {
 	SHIPS,
 	SYSTEMS,
 } from "./content.js";
-import { equipmentMethods } from "./equipment.js";
+import { equipmentMethods, isAmmunition } from "./equipment.js";
 import { fleetMethods } from "./fleet.js";
 import { freelanceMethods } from "./freelance.js";
 import { storageMethods } from "./outfit-storage.js";
@@ -19,7 +19,16 @@ import { applySourceEffects, sourceMethods } from "./source-bridge.js";
 import { applyStoryWorld } from "./story-world.js";
 import { UNIVERSE_FLEET_HULLS } from "./universe.js";
 
-export { ARCS, CAMPAIGN, COMMODITIES, FACTIONS, OUTFITS, SHIPS, SYSTEMS };
+export {
+	ARCS,
+	CAMPAIGN,
+	COMMODITIES,
+	FACTIONS,
+	isAmmunition,
+	OUTFITS,
+	SHIPS,
+	SYSTEMS,
+};
 
 const indexes = new WeakMap();
 const byId = (items, id) => {
@@ -33,6 +42,22 @@ const byId = (items, id) => {
 	}
 	return cached.map.get(id);
 };
+// Built on first use, after every arc module has registered its missions.
+let missionIndex;
+const missionById = (id) => {
+	if (!missionIndex) {
+		missionIndex = new Map();
+		for (const mission of [...CAMPAIGN, ...ARCS.flatMap((arc) => arc.missions)])
+			if (!missionIndex.has(mission.id)) missionIndex.set(mission.id, mission);
+	}
+	return missionIndex.get(id);
+};
+const MINERALS = new Map(
+	OUTFITS.filter((outfit) => outfit.category === "Minerals").map((outfit) => [
+		outfit.name,
+		outfit,
+	]),
+);
 const driveNeighbors = new Map();
 const positive = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
 const int = (value) => Math.floor(Number(value));
@@ -200,11 +225,16 @@ export class Game {
 		])
 			if (!Array.isArray(this.state[key]))
 				throw new Error(`Invalid save field: ${key}`);
-		for (const ship of [...this.state.escorts, ...this.state.fleet])
+		const shipIds = new Set();
+		for (const ship of [...this.state.escorts, ...this.state.fleet]) {
 			if (ship.id?.startsWith("escort-") && !ship.ownedContract) {
 				ship.contract = true;
 				ship.bond = 5000;
+				// Earlier releases could reuse a dismissed escort's id on the same day.
+				if (shipIds.has(ship.id)) ship.id = `escort-${this.nextShipId()}`;
 			}
+			shipIds.add(ship.id);
+		}
 		if (!Array.isArray(saved.wrecks) && this.state.disabled > 0)
 			this.state.wrecks = Array.from(
 				{ length: Math.min(60, this.state.disabled) },
@@ -446,10 +476,7 @@ export class Game {
 	}
 	missionDefinition(active) {
 		if (!active) return null;
-		return (
-			CAMPAIGN.find((m) => m.id === active.id) ||
-			ARCS.flatMap((a) => a.missions).find((m) => m.id === active.id)
-		);
+		return missionById(active.id);
 	}
 	cargoUsed() {
 		return (
@@ -628,9 +655,7 @@ export class Game {
 	mineralCargo() {
 		return Object.entries(this.state.sourceInventory || {})
 			.map(([name, quantity]) => {
-				const outfit = OUTFITS.find(
-					(item) => item.name === name && item.category === "Minerals",
-				);
+				const outfit = MINERALS.get(name);
 				return outfit && quantity > 0
 					? {
 							...outfit,
@@ -1551,7 +1576,7 @@ export class Game {
 					{ charted: fresh },
 				);
 			}
-			if (outfit.category === "Ammunition")
+			if (isAmmunition(outfit))
 				return this.equipmentAction("buyAmmo", {
 					ammoId: outfit.id,
 					quantity: payload.quantity || 1,
@@ -1651,9 +1676,14 @@ export class Game {
 					`Hiring another escort costs ${cost.toLocaleString()} credits.`,
 				);
 			state.credits -= cost;
+			let number = 1;
+			while (
+				state.escorts.some((escort) => escort.name === `Sparrow ${number}`)
+			)
+				number++;
 			const escort = {
-				id: `escort-${state.day}-${state.escorts.length}-${state.totalJumps}`,
-				name: `Sparrow ${state.escorts.length + 1}`,
+				id: `escort-${this.nextShipId()}`,
+				name: `Sparrow ${number}`,
 				shipId: "sparrow",
 				contract: true,
 				bond: 5000,
@@ -1709,6 +1739,7 @@ export class Game {
 			escort.hull = Math.max(0, escort.hull - Number(payload.amount));
 			if (!escort.hull) {
 				if (escort.temporary) {
+					state.sourceEscortHealth ??= {};
 					state.sourceEscortHealth[escort.id] = 0;
 					this.notifySource({
 						type: "destroy",
@@ -2163,12 +2194,30 @@ export class Game {
 			const cost = 3500 + Math.floor(byId(SHIPS, state.shipId).price * 0.025);
 			this.spend(cost);
 			state.rescues++;
-			if (!this.currentSystem().inhabited) {
-				const reachable = SYSTEMS.filter((system) => system.inhabited)
-					.map((system) => ({ system, route: this.routeTo(system.id) }))
-					.filter((entry) => entry.route !== null)
-					.sort((a, b) => a.route.length - b.route.length);
-				state.systemId = reachable[0]?.system.id || "rutilicus";
+			if (!this.currentPlanet()?.inhabited) {
+				const spaceport = (systemId) =>
+					this.systemById(systemId)?.planets.find((planet) => planet.inhabited);
+				let haven = spaceport(state.systemId) && state.systemId;
+				// Breadth-first order reaches the fewest-jumps spaceport first.
+				const queue = [state.systemId],
+					seen = new Set(queue);
+				for (let i = 0; i < queue.length && !haven; i++)
+					for (const next of this.neighbors(queue[i])) {
+						if (seen.has(next)) continue;
+						if (spaceport(next)) {
+							haven = next;
+							break;
+						}
+						seen.add(next);
+						queue.push(next);
+					}
+				haven ||= "rutilicus";
+				if (haven !== state.systemId) {
+					state.systemId = haven;
+					if (!state.visited.includes(haven)) state.visited.push(haven);
+					this.chartSystems(1);
+				}
+				state.planetName = spaceport(haven)?.name ?? state.planetName;
 			}
 			state.cloaked = false;
 			state.mode = "port";

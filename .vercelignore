@@ -1,0 +1,10 @@
+# Build inputs remain included; local tools, test artifacts and documentation do not.
+.cache/
+artifacts/
+test-results/
+playwright-report/
+docs/
+tests/
+playwright*.js
+scripts/audit-*.mjs
+.github/

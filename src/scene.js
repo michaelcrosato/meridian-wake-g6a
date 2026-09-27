@@ -15,7 +15,7 @@ import {
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { ao } from "three/addons/tsl/display/GTAONode.js";
-import { createPhysics, flightSpeed } from "./physics.js";
+import { createPhysics, flightSpeed, preparePhysics } from "./physics.js";
 import { watchRenderHealth } from "./render-health.js";
 import { createAsteroidField } from "./asteroid-field.js";
 import { createQualitySampler } from "./quality.js";
@@ -267,6 +267,8 @@ function createStation() {
 
 /** WebGPU-first, automatically WebGL2-compatible TSL renderer and space-flight simulation. */
 export async function createScene(container, options = {}) {
+	// Physics WASM downloads and compiles while the graphics device initializes.
+	preparePhysics();
 	const renderer = new THREE.WebGPURenderer({
 		antialias: true,
 		samples: 4,
@@ -616,6 +618,20 @@ export async function createScene(container, options = {}) {
 	}
 	const resizeObserver = new ResizeObserver(resize);
 	resizeObserver.observe(container);
+	// Moving to another display can change the pixel ratio without resizing the canvas.
+	let pixelRatioQuery = null;
+	function watchPixelRatio() {
+		pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);
+		pixelRatioQuery =
+			globalThis.matchMedia?.(`(resolution: ${devicePixelRatio || 1}dppx)`) ||
+			null;
+		pixelRatioQuery?.addEventListener("change", onPixelRatioChange);
+	}
+	function onPixelRatioChange() {
+		resize();
+		watchPixelRatio();
+	}
+	watchPixelRatio();
 
 	function removeRock(rock) {
 		physics.remove(rock.physics);
@@ -679,10 +695,29 @@ export async function createScene(container, options = {}) {
 		applyPreset(quality === "Auto" ? "High" : quality);
 	}
 
+	// Shots, particles and pickups are recycled. The renderer retains per-object state
+	// until an object is disposed, while disposing each one would release the shared
+	// pipeline. Each transient material is only ever paired with one geometry.
+	const meshPools = new Map();
+	function acquireMesh(geometry, material) {
+		const mesh =
+			meshPools.get(material)?.pop() || new THREE.Mesh(geometry, material);
+		mesh.position.set(0, 0, 0);
+		mesh.rotation.set(0, 0, 0);
+		mesh.scale.setScalar(1);
+		return mesh;
+	}
+	function releaseMesh(mesh) {
+		mesh.removeFromParent();
+		for (const child of [...mesh.children]) releaseMesh(child);
+		if (!meshPools.has(mesh.material)) meshPools.set(mesh.material, []);
+		meshPools.get(mesh.material).push(mesh);
+	}
+
 	function spawnBurst(x, z, count = 16, kind = 0) {
 		const cap = PRESETS[effective].particles;
 		for (let i = 0; i < count && effects.length < cap; i++) {
-			const mesh = new THREE.Mesh(particleGeometry, particleMaterials[kind]);
+			const mesh = acquireMesh(particleGeometry, particleMaterials[kind]);
 			mesh.position.set(x, 0.1 + Math.random() * 0.4, z);
 			mesh.scale.setScalar(0.55 + Math.random() * 1.6);
 			world.add(mesh);
@@ -698,7 +733,7 @@ export async function createScene(container, options = {}) {
 		}
 	}
 	function spawnPickup(x, z, credits = 75) {
-		const mesh = new THREE.Mesh(pickupGeometry, pickupMaterial);
+		const mesh = acquireMesh(pickupGeometry, pickupMaterial);
 		mesh.position.set(x, 0.4, z);
 		world.add(mesh);
 		pickups.push({ mesh, x, z, credits, age: 0 });
@@ -880,11 +915,11 @@ export async function createScene(container, options = {}) {
 	}
 
 	function clearTransient() {
-		for (const shot of projectiles) shot.mesh.removeFromParent();
+		for (const shot of projectiles) releaseMesh(shot.mesh);
 		projectiles.length = 0;
-		for (const effect of effects) effect.mesh.removeFromParent();
+		for (const effect of effects) releaseMesh(effect.mesh);
 		effects.length = 0;
-		for (const pickup of pickups) pickup.mesh.removeFromParent();
+		for (const pickup of pickups) releaseMesh(pickup.mesh);
 		pickups.length = 0;
 	}
 	function setSystem(system) {
@@ -959,7 +994,7 @@ export async function createScene(container, options = {}) {
 		weapon = {},
 	) {
 		if (projectiles.length >= 64) return false;
-		const mesh = new THREE.Mesh(
+		const mesh = acquireMesh(
 			weapon.secondary ? secondaryGeometry : shotGeometry,
 			weapon.secondary
 				? secondaryMaterial
@@ -970,7 +1005,7 @@ export async function createScene(container, options = {}) {
 		mesh.position.set(x + Math.sin(angle) * 2, 0, z - Math.cos(angle) * 2);
 		mesh.rotation.y = -angle;
 		if (weapon.secondary && weapon.homing) {
-			const trail = new THREE.Mesh(missileTrailGeometry, missileTrailMaterial);
+			const trail = acquireMesh(missileTrailGeometry, missileTrailMaterial);
 			trail.rotation.x = Math.PI / 2;
 			trail.position.z = 1.2;
 			mesh.add(trail);
@@ -1008,11 +1043,11 @@ export async function createScene(container, options = {}) {
 			qualitySampler.suspend();
 			return [];
 		}
-		const measurement = qualitySampler.observe(
-			performance.now(),
-			quality,
-			effective,
-		);
+		// Throttled redraws behind a menu are not performance samples.
+		if (state.menu) qualitySampler.suspend();
+		const measurement = state.menu
+			? { frameMs: null, preset: null }
+			: qualitySampler.observe(performance.now(), quality, effective);
 		if (measurement.frameMs !== null)
 			frameMs += (measurement.frameMs - frameMs) * 0.045;
 		if (measurement.preset) applyPreset(measurement.preset);
@@ -1427,7 +1462,7 @@ export async function createScene(container, options = {}) {
 					authorizeWeapon("intercept")
 				) {
 					spawnBurst(shot.mesh.position.x, shot.mesh.position.z, 5, 1);
-					shot.mesh.removeFromParent();
+					releaseMesh(shot.mesh);
 					projectiles.splice(i, 1);
 					interceptTimer = 0.1;
 					interceptCount++;
@@ -1538,7 +1573,7 @@ export async function createScene(container, options = {}) {
 				if (shot.life <= 0) {
 					if (shot.secondary)
 						spawnBurst(shot.mesh.position.x, shot.mesh.position.z, 16, 0);
-					shot.mesh.removeFromParent();
+					releaseMesh(shot.mesh);
 					projectiles.splice(i, 1);
 				}
 			}
@@ -1569,7 +1604,7 @@ export async function createScene(container, options = {}) {
 						events.push({ type: "pickup", credits: pickup.credits });
 						spawnBurst(pickup.x, pickup.z, 8, 1);
 					}
-					pickup.mesh.removeFromParent();
+					releaseMesh(pickup.mesh);
 					pickups.splice(i, 1);
 				}
 			}
@@ -1652,7 +1687,7 @@ export async function createScene(container, options = {}) {
 			effect.mesh.scale.multiplyScalar(Math.exp(-elapsed * 1.7));
 			effect.mesh.rotation.x += elapsed * 3;
 			if (effect.life <= 0) {
-				effect.mesh.removeFromParent();
+				releaseMesh(effect.mesh);
 				effects.splice(i, 1);
 			}
 		}
@@ -1823,6 +1858,7 @@ export async function createScene(container, options = {}) {
 		renderHealth.dispose();
 		document.removeEventListener("visibilitychange", suspendMeasurement);
 		resizeObserver.disconnect();
+		pixelRatioQuery?.removeEventListener("change", onPixelRatioChange);
 		missionActors.clear();
 		wrecks.clear();
 		physics.dispose();

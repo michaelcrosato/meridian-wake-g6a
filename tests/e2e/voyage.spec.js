@@ -256,7 +256,7 @@ test("audio, fullscreen and exported saves use the actual browser interfaces", a
 	await page.getByLabel("Master volume").fill("0.35");
 	await expect
 		.poll(() => page.evaluate(() => window.meridian.audio.loaded))
-		.toBe(11);
+		.toBe(10);
 	await expect
 		.poll(() => page.evaluate(() => window.meridian.audio.contextState))
 		.toBe("running");
@@ -284,6 +284,17 @@ test("audio, fullscreen and exported saves use the actual browser interfaces", a
 	expect((await downloaded).suggestedFilename()).toMatch(
 		/^meridian-wake-day-\d+\.json$/,
 	);
+	await page.getByRole("button", { name: "Close panel", exact: true }).click();
+	await page.getByRole("button", { name: "Depart", exact: true }).click();
+	await page.getByRole("button", { name: "Options", exact: true }).click();
+	await page.locator('.modal [data-action="toggleMute"]').click();
+	await expect
+		.poll(() => page.evaluate(() => window.meridian.audio.loaded))
+		.toBe(11);
+	await expect
+		.poll(() => page.evaluate(() => window.meridian.audio.music))
+		.toBe("music");
+	expect(await page.evaluate(() => window.meridian.audio.errors)).toEqual([]);
 });
 
 test("landscape touch supports simultaneous steering, thrust and firing, then releases every control", async ({

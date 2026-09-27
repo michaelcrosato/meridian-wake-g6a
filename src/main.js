@@ -5,6 +5,7 @@ import {
 	CAMPAIGN,
 	COMMODITIES,
 	Game,
+	isAmmunition,
 	OUTFITS,
 	SHIPS,
 	SYSTEMS,
@@ -90,7 +91,6 @@ const graphicsRecoveryActions = new Set([
 ]);
 let lastHud = 0;
 let modelTimeAccumulator = 0;
-const resumePanel = null;
 let lastFocus = null;
 const panelHistory = [];
 let bindingCapture = null;
@@ -106,7 +106,6 @@ let shopQuery = "";
 let shopPage = 0;
 let sourceLoading = false;
 let sourceError = "";
-let landingReady = true;
 const controls = new InputController(settings.bindings);
 const actionTouches = new Map();
 let suppressedTouchClick = null;
@@ -839,17 +838,11 @@ function renderOutfitter() {
 	return `<p class="small muted" style="margin-top:0;margin-bottom:22px">Make this hull your own. Balance weapons, engines, energy, cooling, and cargo space. When trading ships, installed upgrades are included in the trade-in credit.</p>${shopSearch(filtered.length)}<div class="item-grid">${filtered
 		.slice(shopPage * 24, (shopPage + 1) * 24)
 		.map((o) => {
-			const buyQuantity = Math.max(
-				0,
-				Math.min(
-					10,
-					(game.ammoCapacity?.(o.id) || 0) - (state().ammo?.[o.id] || 0),
-				),
-			);
+			const buyQuantity = Math.min(10, game.ammoSpace(o.id));
 			const n = Array.isArray(state().outfits)
 				? state().outfits.filter((x) => (x.id || x) === o.id).length
 				: state().outfits?.[o.id] || 0;
-			return `<article class="item-card"><div class="eyebrow">${esc(o.category || o.type || "Ship systems")} ${n ? `<span class="tag">Installed ×${n}</span>` : ""}</div><h3>${esc(o.name)}</h3><p>${esc(o.description)}</p><div class="item-stats">${o.space ? `<span>SPACE <b>${o.space}t</b></span>` : ""}${o.energy ? `<span>ENERGY <b>${o.energy}</b></span>` : ""}</div>${o.category === "Ammunition" ? `<span class="small cyan">${state().ammo?.[o.id] || 0} rounds aboard</span><button data-action="buyAmmo" data-id="${o.id}" data-quantity="${buyQuantity}" ${!buyQuantity ? "disabled" : ""}>${buyQuantity ? `Buy ${buyQuantity} · ${money(o.price * buyQuantity)} cr` : game.ammoCapacity?.(o.id) ? "Magazines full" : "Compatible storage required"}</button>` : `<button data-action="buyOutfit" data-id="${o.id}">${money(o.price)} cr · ${Number(o.sourceAttributes?.map) > 0 ? "Download charts" : "Install"}</button>`}</article>`;
+			return `<article class="item-card"><div class="eyebrow">${esc(o.category || o.type || "Ship systems")} ${n ? `<span class="tag">Installed ×${n}</span>` : ""}</div><h3>${esc(o.name)}</h3><p>${esc(o.description)}</p><div class="item-stats">${o.space ? `<span>SPACE <b>${o.space}t</b></span>` : ""}${o.energy ? `<span>ENERGY <b>${o.energy}</b></span>` : ""}</div>${isAmmunition(o) ? `<span class="small cyan">${state().ammo?.[o.id] || 0} rounds aboard</span><button data-action="buyAmmo" data-id="${o.id}" data-quantity="${buyQuantity}" ${!buyQuantity ? "disabled" : ""}>${buyQuantity ? `Buy ${buyQuantity} · ${money(o.price * buyQuantity)} cr` : game.ammoCapacity?.(o.id) ? "Magazines full" : "Compatible storage required"}</button>` : `<button data-action="buyOutfit" data-id="${o.id}">${money(o.price)} cr · ${Number(o.sourceAttributes?.map) > 0 ? "Download charts" : "Install"}</button>`}</article>`;
 		})
 		.join("")}</div>${renderOutfitStorage()}`;
 }
@@ -1286,7 +1279,7 @@ function renderAbout() {
 	return modal(
 		"Meridian Wake",
 		"A spacefaring adventure",
-		`<p class="small muted">A browser reimagining of <a href="https://github.com/endless-sky/endless-sky" target="_blank" rel="noopener" class="cyan">Endless Sky</a>, the open-source space trading, exploration, and combat game. Built with original low-poly brick spacecraft and adapted source storylines.</p><div class="separator"></div><div class="eyebrow">Generation record</div><p class="small">26 September 2026 · GPT-6 Astra (g6a)</p><div class="eyebrow">Credits</div><p class="small muted">Universe, names, source stories, and placeholder audio: the Endless Sky contributors. Source material is credited in the repository’s attribution and completion report. Interface, procedural geometry, and browser adaptation are new to Meridian Wake.</p><p class="small muted">Rendering: Three.js WebGPU with automatic WebGL2 fallback. Physics: Rapier. Typeface: Lato by Łukasz Dziedzic. Internal, non-commercial testing build.</p><div class="button-row"><button data-action="guide">Read the field guide</button><button data-action="catalog">Explore the source archive ${icon("book")}</button></div>`,
+		`<p class="small muted">A browser reimagining of <a href="https://github.com/endless-sky/endless-sky" target="_blank" rel="noopener" class="cyan">Endless Sky</a>, the open-source space trading, exploration, and combat game. Built with original low-poly brick spacecraft and adapted source storylines.</p><div class="separator"></div><div class="eyebrow">Generation record</div><p class="small">26 September 2026 · GPT-6 Astra (g6a)</p><div class="eyebrow">Credits</div><p class="small muted">Universe, names, source stories, and placeholder audio: the Endless Sky contributors. Source material is credited in the repository’s third-party notices and content guide. Interface, procedural geometry, and browser adaptation are new to Meridian Wake.</p><p class="small muted">Rendering: Three.js WebGPU with automatic WebGL2 fallback. Physics: Rapier. Typeface: Lato by Łukasz Dziedzic. Internal, non-commercial testing build.</p><div class="button-row"><button data-action="guide">Read the field guide</button><button data-action="catalog">Explore the source archive ${icon("book")}</button></div>`,
 		"<span>Independent stars. Shared beginnings.</span>",
 		true,
 	);
@@ -1326,7 +1319,7 @@ function renderCatalog() {
 	return modal(
 		"The galaxy archive",
 		"Endless Sky / source inventory",
-		`<p class="small muted">The archive records the original source definitions for traceability. Read the completion report for the distinction between playable content and reference material.</p><input class="codex-search" id="catalog-search" type="search" value="${esc(catalogQuery)}" placeholder="Search systems, ships, outfits, missions…" aria-label="Search source archive"><p class="eyebrow">${entries.length} source definitions · showing ${filtered.length}</p><div id="catalog-results">${filtered.map((e) => `<div class="codex-entry"><span class="tag">${esc(e.type || e.kind)}</span> ${esc(e.name || e.id)}<small>${esc(e.description || e.file || e.source || "Source definition preserved in the repository inventory.")}</small></div>`).join("")}</div>`,
+		`<p class="small muted">This archive lists the original source definitions. Visit Local contacts at a spaceport for playable original missions.</p><input class="codex-search" id="catalog-search" type="search" value="${esc(catalogQuery)}" placeholder="Search systems, ships, outfits, missions…" aria-label="Search source archive"><p class="eyebrow">${entries.length} source definitions · showing ${filtered.length}</p><div id="catalog-results">${filtered.map((e) => `<div class="codex-entry"><span class="tag">${esc(e.type || e.kind)}</span> ${esc(e.name || e.id)}<small>${esc(e.description || e.file || e.source || "Source definition preserved in the repository inventory.")}</small></div>`).join("")}</div>`,
 	);
 }
 async function loadCatalog() {
@@ -2214,6 +2207,7 @@ window.addEventListener("beforeunload", () => {
 	if (!title) save();
 });
 document.addEventListener("visibilitychange", () => {
+	audio?.setBackground(document.hidden);
 	if (document.hidden) pauseForFocusLoss();
 	else {
 		focusedWindow = document.hasFocus();
@@ -2386,7 +2380,28 @@ function updateHud(t) {
 				: "AUTOSAVE ON";
 }
 let lastFrame = performance.now();
+let frameFault = null;
+// A menu covers the paused scene, so it is redrawn at a modest rate to save power.
+const MENU_FRAME_SECONDS = 1 / 20;
+let menuFrameTime = 0;
 function frame(now) {
+	try {
+		frameStep(now);
+	} catch (error) {
+		// Keep flying after an unexpected fault, and report each distinct one once.
+		if (frameFault !== String(error)) {
+			frameFault = String(error);
+			if (globalThis.reportError) reportError(error);
+			else console.error(error);
+			toast(
+				"Something interrupted the flight. Your last saved voyage is safe.",
+				"error",
+			);
+		}
+	}
+	requestAnimationFrame(frame);
+}
+function frameStep(now) {
 	const dt = Math.min((now - lastFrame) / 1000, 0.1);
 	lastFrame = now;
 	if (scene) {
@@ -2406,27 +2421,33 @@ function frame(now) {
 			approachActorId,
 			approachWreckId,
 		};
-		const events =
-			scene.update(
-				dt,
-				{
-					system: current(),
-					ship: game.currentShip(),
-					cloaked: s.cloaked,
-					energy: s.energy,
-					overheated: s.overheated,
-					escorts: s.escorts,
-					encounter: s.encounter,
-					missionActors: s.missionActors,
-					wrecks: s.wrecks,
-					paused,
-					mode: s.mode,
-				},
-				input,
-			) || [];
+		const menu = !!panel;
+		menuFrameTime = menu ? menuFrameTime + dt : 0;
+		let events = [];
+		if (!menu || menuFrameTime >= MENU_FRAME_SECONDS) {
+			events =
+				scene.update(
+					menu ? menuFrameTime : dt,
+					{
+						system: current(),
+						ship: game.currentShip(),
+						cloaked: s.cloaked,
+						energy: s.energy,
+						overheated: s.overheated,
+						escorts: s.escorts,
+						encounter: s.encounter,
+						missionActors: s.missionActors,
+						wrecks: s.wrecks,
+						paused,
+						menu,
+						mode: s.mode,
+					},
+					input,
+				) || [];
+			menuFrameTime = 0;
+		}
 		for (const event of events) {
 			if (event.type === "landReady") {
-				landingReady = event.ready;
 				game.act("landReady", { ready: event.ready });
 			}
 			if (event.type === "shot") audio?.play("laser");
@@ -2535,7 +2556,6 @@ function frame(now) {
 		while (toasts[0]?.until < now) toasts.shift();
 		renderToasts();
 	}
-	requestAnimationFrame(frame);
 }
 render();
 try {
@@ -2561,6 +2581,7 @@ try {
 		get audio() {
 			return {
 				loaded: audio.buffers.size,
+				loadedIds: [...audio.buffers.keys()],
 				errors: [...audio.errors],
 				contextState: audio.context?.state || "locked",
 				muted: audio.muted,

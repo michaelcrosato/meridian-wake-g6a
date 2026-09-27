@@ -63,27 +63,40 @@ export const textEntry = (element) =>
 	!!element?.closest?.(
 		'input, select, textarea, [contenteditable]:not([contenteditable="false"])',
 	);
+const SPARE_KEYS = [
+	..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => `Key${letter}`),
+	..."1234567890".split("").map((digit) => `Digit${digit}`),
+];
 export function normalizeBindings(saved) {
 	const result = {};
 	const seen = new Set();
-	for (const [action] of BINDING_ACTIONS) {
-		const values = Array.isArray(saved?.[action])
-			? saved[action]
-			: DEFAULT_BINDINGS[action];
+	const claim = (action, values, limit = 2) => {
 		result[action] = values
 			.filter((code) => remappableCode(code) && !seen.has(code))
-			.slice(0, 2);
+			.slice(0, limit);
 		for (const code of result[action]) seen.add(code);
-	}
+	};
+	const stored = BINDING_ACTIONS.filter(([action]) =>
+		Array.isArray(saved?.[action]),
+	);
+	for (const [action] of stored) claim(action, saved[action]);
 	// A corrupt preference must never leave an action inaccessible.
-	if (Object.values(result).some((codes) => !codes.length))
+	if (stored.some(([action]) => !result[action].length))
 		return Object.fromEntries(
 			Object.entries(DEFAULT_BINDINGS).map(([action, codes]) => [
 				action,
 				[...codes],
 			]),
 		);
-	return result;
+	// Actions added since the preference was saved never displace the player's keys.
+	for (const [action] of BINDING_ACTIONS)
+		if (!result[action]) {
+			claim(action, DEFAULT_BINDINGS[action]);
+			if (!result[action].length) claim(action, SPARE_KEYS, 1);
+		}
+	return Object.fromEntries(
+		BINDING_ACTIONS.map(([action]) => [action, result[action]]),
+	);
 }
 export function keyLabel(code, layout) {
 	const label = layout?.get?.(code);

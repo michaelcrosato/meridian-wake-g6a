@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { writeSnapshot } from "./data-snapshots.mjs";
 export const COMMIT = "3248c43994eb3d545265366c8eba909a6646f4d2";
 const cache = resolve(
 	process.env.MERIDIAN_SOURCE_CACHE || `${homedir()}/.cache/meridian-source`,
@@ -269,7 +270,7 @@ const catalog = {
 	license: "GPL-3.0-or-later",
 	generated: "2026-09-26",
 	notice:
-		"Catalog presence is inventory evidence, not proof a source behavior is implemented. See docs/source-audit.md.",
+		"Catalog presence is inventory evidence, not proof a source behavior is implemented. See docs/content.md.",
 	counts,
 	files: documents.map(({ nodes, ...doc }) => ({
 		...doc,
@@ -283,36 +284,32 @@ const catalog = {
 };
 await mkdir("public", { recursive: true });
 await mkdir("src", { recursive: true });
-await writeFile(
-	"public/source-catalog.json",
-	`${JSON.stringify(catalog, null, 2)}\n`,
-);
-await writeFile(
-	"src/source-data.js",
-	`// Generated from Endless Sky ${COMMIT}; GPL-3.0-or-later.\n// Run: node scripts/source-import.mjs. Keep upstream attributions in licenses/.\n` +
-		Object.entries({
-			SOURCE_COMMIT: COMMIT,
-			SYSTEM_DATA,
-			PLANET_DATA,
-			SHIP_DATA,
-			OUTFIT_DATA,
-			MISSION_DATA,
-			FLEET_DATA,
-			SALE_DATA,
-			EXTRA_DATA,
-		})
-			.map(([key, value]) =>
-				key === "MISSION_DATA"
-					? `export const MISSION_DATA = ${JSON.stringify(value.map(({ sourceFilter, destinationFilter, offerConditions, completeConditions, conditions, actions, ...mission }) => mission))}.map(m=>({...m,sourceFilter:m.nodes.find(n=>n.tokens[0]==='source')?.children||[],destinationFilter:m.nodes.find(n=>n.tokens[0]==='destination')?.children||[],conditions:m.nodes.filter(n=>n.tokens[0]==='to'),offerConditions:m.nodes.find(n=>n.tokens[0]==='to'&&n.tokens[1]==='offer')?.children||[],completeConditions:m.nodes.find(n=>n.tokens[0]==='to'&&n.tokens[1]==='complete')?.children||[],actions:m.nodes.filter(n=>n.tokens[0]==='on')}));`
-					: `export const ${key} = ${JSON.stringify(value)};`,
-			)
-			.join("\n") +
-		"\n",
-);
+await writeFile("public/source-catalog.json", `${JSON.stringify(catalog)}\n`);
+writeSnapshot("src/source-data.json.gz", {
+	SOURCE_COMMIT: COMMIT,
+	SYSTEM_DATA,
+	PLANET_DATA,
+	SHIP_DATA,
+	OUTFIT_DATA,
+	MISSION_DATA: MISSION_DATA.map(
+		({
+			sourceFilter,
+			destinationFilter,
+			offerConditions,
+			completeConditions,
+			conditions,
+			actions,
+			...mission
+		}) => mission,
+	),
+	FLEET_DATA,
+	SALE_DATA,
+	EXTRA_DATA,
+});
 await mkdir("licenses", { recursive: true });
 for (const [upstream, local] of [
 	["copyright", "ENDLESS_SKY_COPYRIGHT"],
-	["license.txt", "GPL-3.0.txt"],
+
 	["credits.txt", "ENDLESS_SKY_CREDITS.txt"],
 ])
 	await writeFile(`licenses/${local}`, await cached(upstream));
@@ -322,24 +319,13 @@ console.log(
 			commit: COMMIT,
 			files: files.length,
 			counts,
-			outputs: ["public/source-catalog.json", "src/source-data.js"],
+			outputs: ["public/source-catalog.json", "src/source-data.json.gz"],
 		},
 		null,
 		2,
 	),
 );
 if (process.argv.includes("--audio")) {
-	const manifest = JSON.parse(
-		await readFile("public/audio/manifest.json", "utf8"),
-	);
-	for (const [id, asset] of Object.entries(manifest.assets)) {
-		const response = await fetch(asset.source);
-		if (!response.ok) throw new Error(`Audio ${id}: HTTP ${response.status}`);
-		const buffer = Buffer.from(await response.arrayBuffer());
-		const digest = createHash("sha256").update(buffer).digest("hex");
-		if (digest !== asset.sha256)
-			throw new Error(`Audio ${id}: source checksum differs`);
-		await writeFile(`public${asset.url}`, buffer);
-	}
-	console.log("Audio assets fetched and verified against the single manifest.");
+	const { rebuildAudio } = await import("./audio-assets.mjs");
+	await rebuildAudio();
 }

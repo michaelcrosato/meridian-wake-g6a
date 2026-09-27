@@ -128,7 +128,7 @@ test("complete opening voyage, economy, audio and persisted progress across this
 		.poll(() => page.evaluate(() => window.meridian.audio.loaded), {
 			timeout: 60000,
 		})
-		.toBe(11);
+		.toBe(10);
 	await expect
 		.poll(() => page.evaluate(() => window.meridian.audio.contextState))
 		.toBe("running");

@@ -8,9 +8,15 @@ export function flightSpeed(speed) {
 	return Math.max(9, Number.isFinite(speed) && speed > 0 ? speed : 12);
 }
 
+/** Start fetching and compiling the WASM early; createPhysics reports any failure. */
+export function preparePhysics() {
+	initialization ??= RAPIER.init();
+	initialization.catch(() => {});
+}
+
 /** A planar zero-gravity Rapier world. Rendering interpolates the last two fixed states. */
 export async function createPhysics({ maxBodies = 48 } = {}) {
-	initialization ??= RAPIER.init();
+	preparePhysics();
 	await initialization;
 	const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 	world.timestep = STEP;

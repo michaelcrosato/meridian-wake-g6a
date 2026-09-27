@@ -12,10 +12,15 @@ export class AudioManager {
 		this.music = null;
 		this.errors = [];
 		this.ready = null;
+		this.manifestReady = null;
+		this.pending = new Map();
+		this.desiredMusic = "music";
+		this.musicRequest = 0;
 	}
 
 	// Call from a click/tap/key handler so the browser grants audio playback.
 	init() {
+		if (this.muted) return Promise.resolve(false);
 		const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
 		if (!Context) return Promise.resolve(false);
 		if (!this.context) {
@@ -28,30 +33,71 @@ export class AudioManager {
 		if (this.context.state === "suspended")
 			this.context.resume().catch(() => {});
 		if (this.ready) return this.ready;
-		this.ready = this.load();
-		return this.ready;
+		const ready = this.load();
+		this.ready = ready;
+		// A failed request is retried by the next init instead of silencing the session.
+		ready.then(() => {
+			if (this.ready !== ready) return;
+			const assets = Object.entries(this.manifest?.assets || {});
+			if (
+				!assets.length ||
+				assets.some(([id, asset]) => !asset.loop && !this.buffers.has(id))
+			)
+				this.ready = null;
+		});
+		return ready;
 	}
 
-	async load() {
-		try {
+	loadManifest() {
+		this.manifestReady ??= (async () => {
 			const response = await fetch("/audio/manifest.json");
 			if (!response.ok)
 				throw new Error(`Audio manifest: HTTP ${response.status}`);
 			this.manifest = await response.json();
-			const entries = Object.entries(this.manifest.assets);
+			return this.manifest;
+		})().catch((error) => {
+			this.manifestReady = null;
+			throw error;
+		});
+		return this.manifestReady;
+	}
+
+	loadAsset(id) {
+		if (this.buffers.has(id)) return Promise.resolve(true);
+		if (this.pending.has(id)) return this.pending.get(id);
+		const context = this.context;
+		const asset = this.manifest?.assets[id];
+		if (!context || !asset) return Promise.resolve(false);
+		const request = Promise.resolve().then(async () => {
+			try {
+				const response = await fetch(asset.url);
+				if (!response.ok) throw new Error(`HTTP ${response.status}`);
+				const buffer = await context.decodeAudioData(
+					await response.arrayBuffer(),
+				);
+				if (this.context !== context) return false;
+				this.buffers.set(id, buffer);
+				return true;
+			} catch (error) {
+				if (this.context === context)
+					this.errors.push(`${id}: ${error.message}`);
+				return false;
+			} finally {
+				if (this.pending.get(id) === request) this.pending.delete(id);
+			}
+		});
+		this.pending.set(id, request);
+		return request;
+	}
+
+	async load() {
+		try {
+			await this.loadManifest();
+			// Short effects are ready for interaction; long ambience loads only when selected.
 			await Promise.all(
-				entries.map(async ([id, asset]) => {
-					try {
-						const response = await fetch(asset.url);
-						if (!response.ok) throw new Error(`HTTP ${response.status}`);
-						const buffer = await this.context.decodeAudioData(
-							await response.arrayBuffer(),
-						);
-						this.buffers.set(id, buffer);
-					} catch (error) {
-						this.errors.push(`${id}: ${error.message}`);
-					}
-				}),
+				Object.entries(this.manifest.assets)
+					.filter(([, asset]) => !asset.loop)
+					.map(([id]) => this.loadAsset(id)),
 			);
 			return this.buffers.size > 0;
 		} catch (error) {
@@ -64,6 +110,8 @@ export class AudioManager {
 		if (!this.context || !this.buffers.has(id) || this.muted) return false;
 		const asset = this.manifest.assets[id];
 		if (!asset || (asset.loop && this.music?.id === id)) return false;
+		// A suspended context would queue effects and release them all at once.
+		if (!asset.loop && this.context.state !== "running") return false;
 		const now = this.context.currentTime;
 		if (now - (this.lastPlayed.get(id) ?? -Infinity) < (asset.cooldown ?? 0))
 			return false;
@@ -91,8 +139,21 @@ export class AudioManager {
 	}
 
 	async startMusic(id = "music") {
+		this.desiredMusic = id;
+		const request = ++this.musicRequest;
+		if (this.muted) return false;
 		await this.init();
+		if (request !== this.musicRequest || this.muted) return false;
+		if (!(await this.loadAsset(id))) return false;
+		if (request !== this.musicRequest || this.muted) return false;
 		return this.play(id);
+	}
+
+	/** Silence a hidden tab. Stricter browsers may wait for the next gesture to resume. */
+	setBackground(hidden) {
+		if (!this.context || this.context.state === "closed") return;
+		if (hidden) this.context.suspend().catch(() => {});
+		else if (!this.muted) this.context.resume().catch(() => {});
 	}
 
 	stopMusic() {
@@ -111,20 +172,23 @@ export class AudioManager {
 	setMuted(muted) {
 		this.muted = !!muted;
 		this.updateGain();
-		if (!this.muted && !this.music && this.buffers.has("music"))
-			this.play("music");
+		if (this.muted) {
+			this.musicRequest++;
+			this.stopMusic();
+		} else this.startMusic(this.desiredMusic);
 	}
 
 	updateGain() {
-		if (this.master)
-			this.master.gain.setTargetAtTime(
-				this.muted ? 0 : this.volume,
-				this.context.currentTime,
-				0.025,
-			);
+		if (!this.master) return;
+		const now = this.context.currentTime;
+		this.master.gain.cancelScheduledValues(now);
+		// A stopped/silent graph may stop advancing a scheduled fade in some browsers.
+		if (this.muted) this.master.gain.setValueAtTime(0, now);
+		else this.master.gain.setTargetAtTime(this.volume, now, 0.025);
 	}
 
 	async dispose() {
+		this.musicRequest++;
 		for (const source of this.voices) source.stop();
 		this.voices.clear();
 		this.music = null;
@@ -133,6 +197,7 @@ export class AudioManager {
 		this.context = null;
 		this.master = null;
 		this.ready = null;
+		this.pending.clear();
 		this.buffers.clear();
 	}
 }

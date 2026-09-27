@@ -1298,3 +1298,188 @@ test("the Heliarch expedition exposes and enforces the actual Deneb gate prerequ
 		false,
 	);
 });
+
+test("hired escorts keep unique ids and names after a release, including in older saves", () => {
+	const game = new Game();
+	game.state.credits = 200000;
+	ok(game, "hireEscort");
+	ok(game, "hireEscort");
+	ok(game, "dismissEscort", { escortId: game.state.escorts[0].id });
+	ok(game, "hireEscort");
+	const [kept, hired] = game.state.escorts;
+	assert.notEqual(kept.id, hired.id);
+	assert.notEqual(kept.name, hired.name);
+	ok(game, "launch");
+	ok(game, "escortDamage", { escortId: kept.id, amount: 1000 });
+	assert.deepEqual(
+		game.state.escorts.map((escort) => escort.id),
+		[hired.id],
+	);
+	const saved = JSON.parse(game.save());
+	saved.escorts = [
+		{ ...saved.escorts[0], id: "escort-1-1-0" },
+		{ ...saved.escorts[0], id: "escort-1-1-0" },
+	];
+	const loaded = Game.load(JSON.stringify(saved));
+	assert.equal(new Set(loaded.state.escorts.map((e) => e.id)).size, 2);
+});
+
+test("rescue docks at an inhabited spaceport, even from an uninhabited world in a settled system", () => {
+	const game = new Game();
+	const mixed = SYSTEMS.find(
+		(system) =>
+			system.planets.some((planet) => planet.inhabited) &&
+			system.planets.some((planet) => !planet.inhabited),
+	);
+	game.state.systemId = mixed.id;
+	game.state.planetName = mixed.planets.find((planet) => planet.inhabited).name;
+	ok(game, "launch");
+	ok(game, "selectPlanet", {
+		planetName: mixed.planets.find((planet) => !planet.inhabited).name,
+	});
+	ok(game, "damage", { amount: 99999 });
+	ok(game, "rescue");
+	assert.equal(game.state.systemId, mixed.id);
+	assert.equal(game.currentPlanet().inhabited, true);
+
+	const remote = new Game();
+	const empty = SYSTEMS.find(
+		(system) =>
+			system.planets.length &&
+			system.planets.every((planet) => !planet.inhabited) &&
+			remote.routeTo(system.id) !== null,
+	);
+	remote.state.systemId = empty.id;
+	remote.state.planetName = empty.planets[0].name;
+	ok(remote, "launch");
+	ok(remote, "damage", { amount: 99999 });
+	ok(remote, "rescue");
+	assert.notEqual(remote.state.systemId, empty.id);
+	assert.equal(remote.currentPlanet().inhabited, true);
+	assert.ok(remote.state.visited.includes(remote.state.systemId));
+});
+
+test("ammunition racks install as outfits, add magazine space, and shared pools cannot be overfilled", () => {
+	const game = new Game();
+	game.state.credits = 1e6;
+	const seller = SYSTEMS.flatMap((system) =>
+		system.planets.map((planet) => [system.id, planet.name]),
+	).find(([systemId, planetName]) => {
+		game.state.systemId = systemId;
+		game.state.planetName = planetName;
+		return game
+			.availableOutfits()
+			.some((outfit) => outfit.id === "sidewinder-missile-rack");
+	});
+	assert.ok(seller);
+	game.state.outfits.push("sidewinder-missile-pod");
+	const capacity = game.ammoCapacity("sidewinder-missile");
+	ok(game, "buyOutfit", { outfitId: "sidewinder-missile-rack" });
+	assert.ok(game.state.outfits.includes("sidewinder-missile-rack"));
+	assert.equal(game.ammoCapacity("sidewinder-missile"), capacity + 23);
+
+	for (const ship of SHIPS.filter((ship) => ship.id === "mule")) {
+		game.state.shipId = ship.id;
+		game.state.outfits = [];
+		game.resetAmmunition();
+		assert.equal(game.state.ammo["sidewinder-missile-rack"], undefined);
+		assert.equal(game.ammoSpace("sidewinder-missile"), 0);
+		assert.ok(game.state.ammo["sidewinder-missile"] > 0);
+	}
+
+	game.state.shipId = "sparrow";
+	game.state.outfits = ["korath-minelayer"];
+	game.state.ammo = { "korath-mine": game.ammoCapacity("korath-mine") };
+	assert.equal(game.ammoSpace("cluster-mine"), 0);
+});
+
+test("capturing a native kill target completes the kill objective", async () => {
+	const { SourceMissionEngine } = await import("../src/source-missions.js");
+	const n = (tokens, children = []) => ({ tokens, children });
+	const bounty = {
+		name: "Capture bounty test",
+		sourceFile: "test",
+		nodes: [
+			n(["source", "New Boston"]),
+			n(["destination", "New Boston"]),
+			n(
+				["npc", "kill"],
+				[
+					n(["ship", "Sparrow", "Wanted raider"]),
+					n(["on", "kill"], [n(["set", "bounty claimed"])]),
+				],
+			),
+		],
+	};
+	const game = new Game();
+	await game.enableSourceMissions();
+	game.sourceEngine = new SourceMissionEngine({ missions: [bounty] });
+	game.state.credits = 100000;
+	game.state.extraCrew = 20;
+	ok(game, "sourceAccept", { missionId: bounty.name });
+	ok(game, "launch");
+	const actor = game.missionActors()[0];
+	ok(game, "sourceActorEvent", { action: "disable", actorId: actor.id });
+	ok(game, "sourceActorEvent", { action: "capture", actorId: actor.id });
+	const [active] = game.activeSourceMissions();
+	assert.equal(
+		active.objectives.find((objective) => objective.type === "kill").progress,
+		1,
+	);
+	assert.equal(game.state.sourceQuests.conditions["bounty claimed"], 1);
+	assert.ok(Object.keys(game.state.sourceActors).length > 0);
+	land(game);
+	ok(game, "sourceAbort", { missionId: bounty.name });
+	game.syncSourceActors();
+	assert.deepEqual(game.state.sourceActors, {});
+});
+
+test("native shipyard edits apply every removal and addition in order", async () => {
+	const { applySourceEffects } = await import("../src/source-bridge.js");
+	const n = (tokens, children = []) => ({ tokens, children });
+	const game = new Game();
+	applySourceEffects(game, {
+		ok: true,
+		effects: [
+			{
+				type: "world",
+				node: n(
+					["shipyard", "Avgi Solar Heavy"],
+					[
+						n(["remove", "Melodikos"]),
+						n(["add", "Kestrel"]),
+						n(["remove", "Harmonikos"]),
+					],
+				),
+			},
+		],
+	});
+	assert.deepEqual(game.state.worldSales["shipyard:Avgi Solar Heavy"], [
+		"Entasi",
+		"Kestrel",
+	]);
+});
+
+test("native conditions see a renamed flagship's stock outfits and flagship aliases", async () => {
+	const { sourceContext } = await import("../src/source-bridge.js");
+	const { SourceMissionEngine } = await import("../src/source-missions.js");
+	const game = new Game();
+	game.state.shipId = "mule";
+	game.state.flagshipName = "Wanted raider";
+	const [stock] = Object.keys(
+		SHIPS.find((ship) => ship.id === "mule").stockOutfits,
+	);
+	const context = sourceContext(game);
+	assert.ok(context.outfits[stock] > 0);
+	const engine = new SourceMissionEngine({ missions: [] });
+	engine.bind({ day: 1 }, context);
+	assert.equal(
+		engine.value(`outfit (flagship installed): ${stock}`),
+		context.outfits[stock],
+	);
+	assert.equal(
+		engine.value("flagship attribute: cargo space"),
+		context.shipAttributes["cargo space"],
+	);
+	assert.equal(engine.value("days until year end"), 46);
+});

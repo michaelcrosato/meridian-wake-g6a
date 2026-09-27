@@ -1,5 +1,6 @@
 /** Connect the native data interpreter to the browser simulation without importing its data at startup. */
 import { ARCS, OUTFITS, SALES, SHIPS, SYSTEMS } from "./content.js";
+import { isAmmunition } from "./equipment.js";
 
 const shipByName = (name) => {
 	if (!name) return undefined;
@@ -18,7 +19,9 @@ const systemByName = (name) =>
 export function sourceContext(game) {
 	const stats = game.stats();
 	const outfits = {
-		...(shipByName(stats.name)?.stockOutfits || {}),
+		// By hull id: captured and awarded flagships keep their own display names.
+		...(SHIPS.find((ship) => ship.id === game.state.shipId)?.stockOutfits ||
+			{}),
 		...game.state.sourceInventory,
 	};
 	for (const id of game.state.outfits) {
@@ -186,18 +189,17 @@ function applyWorld(game, node) {
 			...(SALES.find((sale) => sale.name === name && sale.type === type)
 				?.items || []),
 		];
-		const current = game.state.worldSales[key];
+		let items = game.state.worldSales[key];
 		for (const child of node.children) {
 			if (child.tokens[0] === "remove")
-				game.state.worldSales[key] = current.filter(
-					(item) => item !== child.tokens[1],
-				);
+				items = items.filter((item) => item !== child.tokens[1]);
 			else {
 				const item =
 					child.tokens[0] === "add" ? child.tokens[1] : child.tokens[0];
-				if (!current.includes(item)) current.push(item);
+				if (!items.includes(item)) items.push(item);
 			}
 		}
+		game.state.worldSales[key] = items;
 	}
 }
 export function applySourceEffects(game, result) {
@@ -222,7 +224,7 @@ export function applySourceEffects(game, result) {
 					0,
 					(game.state.sourceInventory[effect.name] || 0) + effect.count,
 				);
-			} else if (outfit?.category === "Ammunition") {
+			} else if (isAmmunition(outfit)) {
 				game.state.ammo[outfit.id] = Math.max(
 					0,
 					(game.state.ammo[outfit.id] || 0) + effect.count,
@@ -340,6 +342,7 @@ export function sourceMethods(Game) {
 			this.sourceEngine.bind(this.state, sourceContext(this));
 			for (const key of Object.keys(store.world))
 				if (key.startsWith("canonical:")) delete store.world[key];
+			this.sourceEngine.resetWorldCaches();
 			const rawNode = (tokens) => ({ tokens, children: [] });
 			for (const id of Object.keys(this.state.worldSystems)) {
 				const system = this.systemById(id),
@@ -380,7 +383,7 @@ export function sourceMethods(Game) {
 					children,
 				};
 			}
-			this.sourceEngine.distanceCache.clear();
+			this.sourceEngine.resetWorldCaches();
 			this._canonicalStore = store;
 			this._canonicalRevision = this.state.worldRevision || 0;
 		},
@@ -439,7 +442,8 @@ export function sourceMethods(Game) {
 		},
 
 		sourceDialogue() {
-			if (!this.sourceEngine) return null;
+			// Polled every frame; skip building the full context when nothing is open.
+			if (!this.sourceEngine || !this.state.sourceQuests?.dialogue) return null;
 			this.sourceEngine.bind(this.state, sourceContext(this));
 			return this.sourceEngine.dialogueView();
 		},
@@ -511,7 +515,7 @@ export function sourceMethods(Game) {
 			);
 			const accepting =
 				["offer", "accept"].includes(method) ||
-				(method === "choose" && this.sourceDialogue()?.terminal === "accept");
+				(method === "choose" && this.sourceDialogue()?.accepts === true);
 			if (
 				accepting &&
 				protectedGroup &&
@@ -615,6 +619,14 @@ export function sourceMethods(Game) {
 					}
 				}
 			}
+			// Records of finished missions would otherwise stay in every save; a mission
+			// re-accepted on the same day must not inherit their destroyed ships either.
+			const live = (this.state.sourceQuests?.active || []).map(
+				(active) => `native:${active.id}:${active.acceptedDay}:`,
+			);
+			for (const id of Object.keys(this.state.sourceActors))
+				if (!live.some((prefix) => id.startsWith(prefix)))
+					delete this.state.sourceActors[id];
 			this.state.missionActors = [
 				...visible,
 				...(this.state.missionActors || []).filter(
@@ -713,6 +725,8 @@ export function sourceMethods(Game) {
 				if (action === "capture") {
 					this.state.credits -= 3000;
 					notify("capture");
+					// As in Endless Sky, a captured ship also counts as killed.
+					notify("kill");
 					actor.status = "captured";
 					const captured = {
 						id: this.nextShipId(),

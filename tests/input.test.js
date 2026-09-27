@@ -87,6 +87,14 @@ test("saved custom bindings preserve alternatives, reject collisions and retain 
 	assert.deepEqual(input.bindings, DEFAULT_BINDINGS);
 	assert.deepEqual(normalizeBindings({ thrust: [] }), DEFAULT_BINDINGS);
 	assert.deepEqual(normalizeBindings({ fire: ["Escape"] }), DEFAULT_BINDINGS);
+	// A preference saved before "scan" existed keeps its custom keys.
+	const older = { ...DEFAULT_BINDINGS, fire: ["KeyR"], thrust: ["KeyZ"] };
+	delete older.scan;
+	const migrated = normalizeBindings(older);
+	assert.deepEqual(migrated.fire, ["KeyR"]);
+	assert.deepEqual(migrated.thrust, ["KeyZ"]);
+	assert.equal(migrated.scan.length, 1);
+	assert.ok(!Object.values(older).flat().includes(migrated.scan[0]));
 	assert.equal(keyLabel("KeyW", new Map([["KeyW", "z"]])), "Z");
 });
 

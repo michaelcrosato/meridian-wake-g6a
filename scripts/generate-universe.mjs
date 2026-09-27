@@ -1,4 +1,3 @@
-import { writeFileSync } from "node:fs";
 import {
 	EXTRA_DATA,
 	FLEET_DATA,
@@ -9,6 +8,7 @@ import {
 	SOURCE_COMMIT,
 	SYSTEM_DATA,
 } from "../src/source-data.js";
+import { writeSnapshot } from "./data-snapshots.mjs";
 
 const id = (name) =>
 	name
@@ -411,10 +411,15 @@ const extraPlanets = PLANET_DATA.filter(
 	shipyard: planet.shipyard,
 	outfitter: planet.outfitter,
 }));
-writeFileSync(
-	"src/universe.js",
-	`// Generated from Endless Sky ${SOURCE_COMMIT}. Rebalanced rules are Meridian Wake additions.\nexport const SOURCE_COMMIT=${JSON.stringify(SOURCE_COMMIT)};\nexport const UNIVERSE_FLEET_HULLS=${JSON.stringify(fleetCatalog)};\nexport const UNIVERSE_EXTRA_PLANETS=${JSON.stringify(extraPlanets)};\nexport const UNIVERSE_SYSTEMS=${JSON.stringify(systems)};\nexport const UNIVERSE_SHIPS=${JSON.stringify(ships)};\nexport const UNIVERSE_OUTFITS=${JSON.stringify(outfits)};\nexport const UNIVERSE_SALES=${JSON.stringify(SALE_DATA)};\n`,
-);
+writeSnapshot("src/universe.json.gz", {
+	SOURCE_COMMIT,
+	UNIVERSE_FLEET_HULLS: fleetCatalog,
+	UNIVERSE_EXTRA_PLANETS: extraPlanets,
+	UNIVERSE_SYSTEMS: systems,
+	UNIVERSE_SHIPS: ships,
+	UNIVERSE_OUTFITS: outfits,
+	UNIVERSE_SALES: SALE_DATA,
+});
 console.log({
 	systems: systems.length,
 	ships: ships.length,
