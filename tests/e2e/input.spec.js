@@ -118,21 +118,49 @@ test("standard gamepad navigates menus, changes values, flies, pauses and clears
 			axes: [0, 0, 0, 0],
 			buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
 		};
+		const samples = [];
+		let polls = 0;
+		window.sampleGamepadButton = (button) =>
+			new Promise((resolve) => {
+				const firstPoll = polls;
+				// Each snapshot lasts for one actual gamepad poll. Wall-clock sleeps
+				// can become a long press when software rendering delays automation.
+				samples.push(
+					{ button: null },
+					{ button },
+					{
+						button: null,
+						done: () => resolve(polls - firstPoll),
+					},
+				);
+			});
 		Object.defineProperty(navigator, "getGamepads", {
-			value: () => [window.testPad],
+			value: () => {
+				polls++;
+				const sample = samples.shift();
+				const snapshot = {
+					...window.testPad,
+					axes: [...window.testPad.axes],
+					buttons: sample
+						? window.testPad.buttons.map((_, index) => ({
+								pressed: index === sample.button,
+								value: Number(index === sample.button),
+							}))
+						: window.testPad.buttons.map((button) => ({ ...button })),
+				};
+				// Resolve after the application has consumed the final neutral sample.
+				if (sample?.done) queueMicrotask(sample.done);
+				return [snapshot];
+			},
 		});
 	});
 	await start(page);
 	async function press(button) {
-		await page.evaluate((index) => {
-			window.testPad.buttons[index] = { pressed: true, value: 1 };
-		}, button);
-		await page.waitForTimeout(180);
-		await page.evaluate((index) => {
-			window.testPad.buttons[index] = { pressed: false, value: 0 };
-		}, button);
-		await page.waitForTimeout(180);
+		expect(
+			await page.evaluate((index) => window.sampleGamepadButton(index), button),
+		).toBe(3);
 	}
+	await press(null); // Observe a neutral controller after launch before moving.
 	await page.evaluate(() => {
 		window.testPad.axes[1] = -1;
 	});
