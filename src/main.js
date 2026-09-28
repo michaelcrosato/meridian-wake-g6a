@@ -2580,8 +2580,10 @@ try {
 		},
 		get audio() {
 			return {
-				loaded: audio.buffers.size,
-				loadedIds: [...audio.buffers.keys()],
+				// Decoded audio plus ambience that has streamed; a track may have done both.
+				loaded: new Set([...audio.buffers.keys(), ...audio.streamed]).size,
+				loadedIds: [...new Set([...audio.buffers.keys(), ...audio.streamed])],
+				streamed: [...audio.streamed],
 				errors: [...audio.errors],
 				contextState: audio.context?.state || "locked",
 				muted: audio.muted,

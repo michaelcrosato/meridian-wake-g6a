@@ -37,6 +37,8 @@ const PRESETS = {
 	},
 	Balanced: {
 		dpr: 1,
+		// About 1920×1080: large low-density displays also shed pixels in Balanced.
+		pixels: 2_100_000,
 		shadow: 1024,
 		bodies: 42,
 		rocks: 16,
@@ -605,8 +607,10 @@ export async function createScene(container, options = {}) {
 	function resize() {
 		const width = Math.max(1, container.clientWidth || innerWidth);
 		const height = Math.max(1, container.clientHeight || innerHeight);
+		const preset = PRESETS[effective];
+		const budget = Math.sqrt((preset.pixels ?? Infinity) / (width * height));
 		renderer.setPixelRatio(
-			Math.min(devicePixelRatio || 1, PRESETS[effective].dpr),
+			Math.min(devicePixelRatio || 1, preset.dpr, Math.max(0.5, budget)),
 		);
 		renderer.setSize(width, height, false);
 		const half = view === "title" ? 20 : view === "port" ? 23 : 22;
@@ -695,23 +699,55 @@ export async function createScene(container, options = {}) {
 		applyPreset(quality === "Auto" ? "High" : quality);
 	}
 
-	// Shots, particles and pickups are recycled. The renderer retains per-object state
-	// until an object is disposed, while disposing each one would release the shared
-	// pipeline. Each transient material is only ever paired with one geometry.
-	const meshPools = new Map();
-	function acquireMesh(geometry, material) {
-		const mesh =
-			meshPools.get(material)?.pop() || new THREE.Mesh(geometry, material);
-		mesh.position.set(0, 0, 0);
-		mesh.rotation.set(0, 0, 0);
-		mesh.scale.setScalar(1);
-		return mesh;
+	// Shots, particles and pickups draw as one instanced batch per material, a handful of
+	// draw calls however heavy the combat. Gameplay moves recycled Object3D stand-ins
+	// whose matrices are copied into the batch each frame.
+	const batches = new Map(
+		[
+			[shotGeometry, playerShotMaterial, 64],
+			[shotGeometry, enemyShotMaterial, 64],
+			[secondaryGeometry, secondaryMaterial, 64],
+			[missileTrailGeometry, missileTrailMaterial, 64],
+			...particleMaterials.map((material) => [particleGeometry, material, 100]),
+			[pickupGeometry, pickupMaterial, 64],
+		].map(([geometry, material, capacity]) => {
+			const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+			mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+			mesh.frustumCulled = false;
+			mesh.count = 0;
+			mesh.visible = false;
+			world.add(mesh);
+			return [material, { mesh, capacity, active: new Set(), spare: [] }];
+		}),
+	);
+	function acquireMesh(_geometry, material) {
+		const batch = batches.get(material);
+		const proxy = batch.spare.pop() || new THREE.Object3D();
+		proxy.position.set(0, 0, 0);
+		proxy.rotation.set(0, 0, 0);
+		proxy.scale.setScalar(1);
+		proxy.userData.batch = batch;
+		batch.active.add(proxy);
+		return proxy;
 	}
-	function releaseMesh(mesh) {
-		mesh.removeFromParent();
-		for (const child of [...mesh.children]) releaseMesh(child);
-		if (!meshPools.has(mesh.material)) meshPools.set(mesh.material, []);
-		meshPools.get(mesh.material).push(mesh);
+	function releaseMesh(proxy) {
+		proxy.removeFromParent();
+		for (const child of [...proxy.children]) releaseMesh(child);
+		const { batch } = proxy.userData;
+		if (batch.active.delete(proxy)) batch.spare.push(proxy);
+	}
+	function syncBatches() {
+		for (const batch of batches.values()) {
+			let count = 0;
+			for (const proxy of batch.active) {
+				if (count === batch.capacity) break;
+				proxy.updateWorldMatrix(true, false);
+				batch.mesh.setMatrixAt(count++, proxy.matrixWorld);
+			}
+			batch.mesh.count = count;
+			batch.mesh.visible = count > 0;
+			if (count) batch.mesh.instanceMatrix.needsUpdate = true;
+		}
 	}
 
 	function spawnBurst(x, z, count = 16, kind = 0) {
@@ -720,7 +756,6 @@ export async function createScene(container, options = {}) {
 			const mesh = acquireMesh(particleGeometry, particleMaterials[kind]);
 			mesh.position.set(x, 0.1 + Math.random() * 0.4, z);
 			mesh.scale.setScalar(0.55 + Math.random() * 1.6);
-			world.add(mesh);
 			const angle = Math.random() * TAU,
 				speed = 1 + Math.random() * 7;
 			effects.push({
@@ -735,7 +770,6 @@ export async function createScene(container, options = {}) {
 	function spawnPickup(x, z, credits = 75) {
 		const mesh = acquireMesh(pickupGeometry, pickupMaterial);
 		mesh.position.set(x, 0.4, z);
-		world.add(mesh);
 		pickups.push({ mesh, x, z, credits, age: 0 });
 	}
 	function removeEnemy(enemy) {
@@ -1010,7 +1044,6 @@ export async function createScene(container, options = {}) {
 			trail.position.z = 1.2;
 			mesh.add(trail);
 		}
-		world.add(mesh);
 		const speed = weapon.speed || (hostile ? 28 : 56);
 		projectiles.push({
 			mesh,
@@ -1753,6 +1786,7 @@ export async function createScene(container, options = {}) {
 		jumpFlash = Math.max(0, jumpFlash - elapsed * 1.2);
 		renderer.toneMappingExposure = 1.22 + jumpFlash * 0.35;
 		renderer.info.reset();
+		syncBatches();
 		pipeline.render();
 		return events;
 	}
@@ -1869,6 +1903,7 @@ export async function createScene(container, options = {}) {
 		depthMaterial.dispose();
 		scenePass.dispose();
 		environment.dispose();
+		for (const batch of batches.values()) batch.mesh.dispose();
 		disposeObject(world);
 		for (const geometry of [
 			shotGeometry,

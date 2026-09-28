@@ -54,6 +54,9 @@ function fixture(t, delays = {}, failures = new Set()) {
 		async suspend() {
 			this.state = "suspended";
 		}
+		createMediaElementSource() {
+			return { connect() {} };
+		}
 		async close() {
 			this.state = "closed";
 		}
@@ -158,5 +161,82 @@ test("effects are dropped rather than queued while audio is suspended or the tab
 	await Promise.resolve();
 	assert.equal(audio.play("laser"), true);
 	assert.equal(audio.music.id, "music");
+	await audio.dispose();
+});
+
+function mediaElements(t, play) {
+	const elements = [];
+	globalThis.Audio = class {
+		constructor(src) {
+			this.src = src;
+			this.paused = true;
+			elements.push(this);
+		}
+		async play() {
+			await play(this);
+			this.paused = false;
+		}
+		pause() {
+			this.paused = true;
+		}
+	};
+	t.after(() => delete globalThis.Audio);
+	return elements;
+}
+
+test("ambience streams through a media element instead of being decoded", async (t) => {
+	const { requests } = fixture(t);
+	const elements = mediaElements(t, async () => {});
+	const audio = new AudioManager();
+	assert.equal(await audio.startMusic("port"), true);
+	assert.equal(audio.music.id, "port");
+	assert.equal(elements[0].src, "/port.opus");
+	assert.equal(elements[0].paused, false);
+	assert.equal(audio.buffers.has("port"), false);
+	assert.ok(!requests.includes("/port.opus"));
+	elements[0].currentTime = 42;
+	assert.equal(await audio.startMusic("port"), true);
+	assert.equal(
+		elements[0].currentTime,
+		42,
+		"the playing track is not restarted",
+	);
+	await audio.startMusic("music");
+	assert.equal(elements[0].paused, true);
+	assert.deepEqual([...audio.streamed].sort(), ["music", "port"]);
+	audio.setMuted(true);
+	assert.equal(elements[1].paused, true);
+	await audio.dispose();
+});
+
+test("refused streaming falls back to decoded ambience, and a superseded request leaves music alone", async (t) => {
+	fixture(t);
+	mediaElements(t, async () => {
+		throw new DOMException("Playback needs a gesture", "NotAllowedError");
+	});
+	const refused = new AudioManager();
+	assert.equal(await refused.startMusic("port"), true);
+	assert.equal(refused.buffers.has("port"), true);
+	assert.equal(refused.music.id, "port");
+	assert.equal(refused.music.stream, undefined);
+	await refused.dispose();
+
+	let release;
+	const elements = mediaElements(t, (element) =>
+		element.src === "/port.opus" && !release
+			? new Promise((_, reject) => {
+					release = () => reject(new DOMException("Interrupted", "AbortError"));
+				})
+			: undefined,
+	);
+	const audio = new AudioManager();
+	await audio.init();
+	const first = audio.startMusic("port");
+	await new Promise((resolve) => setTimeout(resolve));
+	const second = audio.startMusic("port");
+	release();
+	await Promise.all([first, second]);
+	assert.equal(audio.music.id, "port");
+	assert.equal(elements[0].paused, false);
 	await audio.dispose();
 });
