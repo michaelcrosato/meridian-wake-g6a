@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
+      # Report every shard's results instead of cancelling the rest on one failure.
+      fail-fast: false
       matrix:
         shard: [1, 2, 3]
     steps:
