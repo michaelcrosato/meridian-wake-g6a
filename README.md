@@ -37,13 +37,14 @@ Ports offer contracts, markets, shipyards, outfitters, fleet services and bankin
 ## Maintain and verify
 
 ```sh
+npm run lint
 npm test
 npm run test:e2e
 npm run check:size
 npm run verify:source
 ```
 
-`verify:source` also needs FFmpeg/ffprobe. Browser tests use Playwright Chromium (`npx playwright install chromium`). See [development and size budgets](docs/development.md), [content and source regeneration](docs/content.md), and [browser checks and limits](docs/compatibility.md).
+`verify:source` also needs FFmpeg/ffprobe. Browser tests use Playwright Chromium (`npx playwright install chromium`). Every change lands through a reviewed pull request; see [AGENTS.md](AGENTS.md) and `scripts/ship.sh`. See [development and size budgets](docs/development.md), [content and source regeneration](docs/content.md), and [browser checks and limits](docs/compatibility.md).
 
 The renderer uses Three.js WebGPU with WebGL2 fallback, node materials, optional bloom/AO and automatic quality selection. Rapier runs fixed simulation steps with interpolation. The same game is available through keyboard, touch and standard gamepads. A current hardware-accelerated browser is recommended.
 
