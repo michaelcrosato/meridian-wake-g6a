@@ -528,8 +528,9 @@ test("six protected source ships survive the final convoy jump and physically ar
 		);
 	});
 	// Let the locator hit-test the moving contact at press time, rather than
-	// reusing a bounding box across several slow automation round trips.
-	await contact.click({ delay: 300 });
+	// reusing a bounding box across several slow automation round trips. The
+	// hold spans several 250 ms HUD refreshes even at slow software-GPU frame rates.
+	await contact.click({ delay: 1200 });
 	const heldClick = await page.evaluate(() => window.heldContactAudit);
 	expect(heldClick.trustedDown).toBe(true);
 	expect(heldClick.captureAcquired).toBe(true);

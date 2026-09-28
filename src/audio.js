@@ -16,6 +16,8 @@ export class AudioManager {
 		this.pending = new Map();
 		this.desiredMusic = "music";
 		this.musicRequest = 0;
+		this.streams = new Map();
+		this.streamed = new Set();
 	}
 
 	// Call from a click/tap/key handler so the browser grants audio playback.
@@ -144,9 +146,50 @@ export class AudioManager {
 		if (this.muted) return false;
 		await this.init();
 		if (request !== this.musicRequest || this.muted) return false;
+		if (await this.playStream(id, request)) return true;
+		if (request !== this.musicRequest || this.muted) return false;
 		if (!(await this.loadAsset(id))) return false;
 		if (request !== this.musicRequest || this.muted) return false;
 		return this.play(id);
+	}
+
+	// Long ambience streams through a media element rather than a decoded buffer (both
+	// tracks decode to about 86 MB). If the browser refuses to start the element, the
+	// caller falls back to the decoded path, so playback is never worse than before.
+	async playStream(id, request) {
+		const asset = this.manifest?.assets[id];
+		const Element = globalThis.Audio;
+		if (!asset?.loop || !Element || !this.context?.createMediaElementSource)
+			return false;
+		let stream = this.streams.get(id);
+		if (!stream) {
+			const element = new Element(asset.url);
+			element.loop = true;
+			element.preload = "auto";
+			const gain = this.context.createGain();
+			gain.gain.value = asset.gain ?? 1;
+			this.context.createMediaElementSource(element).connect(gain);
+			// Stays connected: a paused element is silent, and disconnecting mid-mute can
+			// leave the master gain's scheduled change unapplied.
+			gain.connect(this.master);
+			stream = { element, gain };
+			this.streams.set(id, stream);
+		}
+		// Asking again for the track that is already playing keeps it going.
+		if (this.music?.stream === stream && !stream.element.paused) return true;
+		this.stopMusic();
+		stream.element.currentTime = 0;
+		this.music = { id, stream };
+		try {
+			await stream.element.play();
+		} catch {
+			// A newer request (or mute) owns the music now; otherwise fall back.
+			if (request !== this.musicRequest) return true;
+			this.stopMusic();
+			return false;
+		}
+		this.streamed.add(id);
+		return true;
 	}
 
 	/** Silence a hidden tab. Stricter browsers may wait for the next gesture to resume. */
@@ -157,10 +200,10 @@ export class AudioManager {
 	}
 
 	stopMusic() {
-		if (this.music) {
-			this.music.source.stop();
-			this.music = null;
-		}
+		if (!this.music) return;
+		if (this.music.stream) this.music.stream.element.pause();
+		else this.music.source.stop();
+		this.music = null;
 	}
 
 	setVolume(value) {
@@ -189,6 +232,9 @@ export class AudioManager {
 
 	async dispose() {
 		this.musicRequest++;
+		for (const { element } of this.streams.values()) element.pause();
+		this.streams.clear();
+		this.streamed.clear();
 		for (const source of this.voices) source.stop();
 		this.voices.clear();
 		this.music = null;
