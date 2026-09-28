@@ -1483,3 +1483,25 @@ test("native conditions see a renamed flagship's stock outfits and flagship alia
 	);
 	assert.equal(engine.value("days until year end"), 46);
 });
+
+test("built-in reactors and coolers count toward regeneration", () => {
+	const game = new Game();
+	game.state.shipId = "falcon";
+	game.state.outfits = [];
+	const stats = game.stats();
+	assert.ok(stats.energyRegen > 8, `falcon regen ${stats.energyRegen}`);
+	assert.ok(stats.cooling > 12, `falcon cooling ${stats.cooling}`);
+});
+
+test("stored outfits removed by a data update are dropped instead of rejecting the save", () => {
+	const saved = JSON.parse(new Game().save());
+	const [known] = OUTFITS;
+	saved.outfitStorage = {
+		"New Boston": { [known.id]: 2, "retired-outfit": 1 },
+	};
+	const loaded = new Game(saved);
+	assert.deepEqual(loaded.state.outfitStorage["New Boston"], { [known.id]: 2 });
+	assert.equal(saved.outfitStorage["New Boston"]["retired-outfit"], 1);
+	saved.outfitStorage = { "New Boston": { "retired-outfit": 1 } };
+	assert.deepEqual(new Game(saved).state.outfitStorage, {});
+});

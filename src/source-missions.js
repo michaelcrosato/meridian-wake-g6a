@@ -381,22 +381,21 @@ export class SourceMissionEngine {
 			(!failure || !this.conditions(failure.children))
 		);
 	}
-	choosePlanet(n, origin, exclude = []) {
+	choosePlanet(n, origin, exclude = [], seed = "") {
 		if (!n) return this.context.planetName;
 		if (n.tokens[1])
 			return n.tokens[1] === "<origin>" ? this.context.planetName : n.tokens[1];
 		const candidates = [...this.planets.values()].filter(
 			(p) => p.spaceport && this.matches(n.children, p.name, origin),
 		);
-		candidates.sort(
-			(a, b) =>
-				this.distance(origin, this.planetSystems.get(a.name)) -
-					this.distance(origin, this.planetSystems.get(b.name)) ||
-				a.name.localeCompare(b.name),
-		);
 		// Several stops from one filter visit different places when enough match.
-		return (candidates.find((p) => !exclude.includes(p.name)) || candidates[0])
-			?.name;
+		const fresh = candidates.filter((p) => !exclude.includes(p.name));
+		const pool = fresh.length ? fresh : candidates;
+		if (!pool.length) return undefined;
+		// Like Endless Sky, any matching planet may be chosen. The seed keeps a port's
+		// offers stable for the day, so a listed job keeps its destination on acceptance.
+		const key = `${seed}:${this.context.day}:${this.context.planetName}`;
+		return pool[hash(key) % pool.length].name;
 	}
 	/** "cargo random": a commodity traded at both ends, chosen deterministically. */
 	randomCommodity(id, from, to) {
@@ -433,6 +432,8 @@ export class SourceMissionEngine {
 			destination = this.choosePlanet(
 				node(m.nodes, "destination"),
 				c.systemName,
+				[],
+				m.name,
 			),
 			destinationSystem = this.planetSystems.get(destination);
 		if (!destination || !destinationSystem)
@@ -457,7 +458,12 @@ export class SourceMissionEngine {
 		}
 		const stopovers = [];
 		for (const n of nodesOf(m.nodes, "stopover")) {
-			const planet = this.choosePlanet(n, c.systemName, stopovers);
+			const planet = this.choosePlanet(
+				n,
+				c.systemName,
+				stopovers,
+				`${m.name}:stopover:${stopovers.length}`,
+			);
 			if (planet) stopovers.push(planet);
 		}
 		const jumps = this.tourJumps(
@@ -1175,7 +1181,12 @@ export class SourceMissionEngine {
 			a.waypoints.every((s) => a.visitedSystems.includes(s)) &&
 			a.stopovers.every((p) => a.visitedPlanets.includes(p)) &&
 			a.objectives.every(
-				(o) => !o.enabled || o.type === "save" || o.progress >= o.count,
+				(o) =>
+					!o.enabled ||
+					o.type === "save" ||
+					o.progress >= o.count ||
+					// Evaded ships only block completion while they share the player's system.
+					(o.type === "evade" && o.systemName !== this.context.systemName),
 			) &&
 			this.conditions(node(m.nodes, "to", "complete")?.children || [])
 		);
@@ -1320,7 +1331,10 @@ export class SourceMissionEngine {
 					}
 					for (const o of objectives)
 						if (
-							o.type === event.type &&
+							(o.type === event.type ||
+								// Disabled, destroyed or captured ships no longer need evading.
+								(o.type === "evade" &&
+									["disable", "destroy", "capture"].includes(event.type))) &&
 							(!event.actorId || !(o.actors || []).includes(event.actorId))
 						) {
 							o.progress = Math.min(o.count, o.progress + 1);
