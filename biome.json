@@ -1,0 +1,22 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+	"files": {
+		"includes": [
+			"**",
+			"!package-lock.json",
+			"!public/source-catalog.json",
+			"!public/audio/manifest.json",
+			"!src/campaign-convoys.js",
+			"!src/campaign-topology.js",
+			"!tests/fixtures"
+		]
+	},
+	"formatter": { "indentStyle": "tab" },
+	"linter": {
+		"rules": {
+			"complexity": { "noImportantStyles": "off" },
+			"style": { "noDescendingSpecificity": "off" }
+		}
+	}
+}

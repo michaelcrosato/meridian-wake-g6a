@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeLandmark, createSpecialLandmarks } from "../src/landmarks.js";
+import { createSpecialLandmarks, describeLandmark } from "../src/landmarks.js";
 import { disposeObject } from "../src/ship-model.js";
 
 // Named references and attributes are from the pinned source planet definitions.

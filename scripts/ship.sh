@@ -35,11 +35,13 @@ fi
 
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
-echo "ship: running npm test"
-if ! npm test >"$log" 2>&1; then
-	tail -n 40 "$log"
-	die "tests failed; nothing was committed"
-fi
+for check in lint test; do
+	echo "ship: running npm run $check"
+	if ! npm run "$check" >"$log" 2>&1; then
+		tail -n 40 "$log"
+		die "npm run $check failed; nothing was committed (npm run format fixes formatting)"
+	fi
+done
 
 if [[ $branch == "$main" ]]; then
 	slug=$(tr '[:upper:]' '[:lower:]' <<<"$subject" | tr -cs 'a-z0-9' '-' | cut -c1-40 | sed 's/^-*//; s/-*$//')
@@ -63,19 +65,22 @@ else
 fi
 echo "ship: pull request #$pr; waiting for CI"
 
-# Faster checks (e.g. Vercel) can finish before CI registers; wait for the CI job itself.
+# The required check aggregates other jobs, so it only appears once they finish. Poll
+# until it passes, stopping early when any check fails or is cancelled.
 required=${SHIP_REQUIRED_CHECK:-verify}
+failed="CI failed on #$pr. Fix it and run scripts/ship.sh again, or close it: gh pr close $pr --delete-branch --comment '<reason>'"
 check_state() {
 	gh pr checks "$pr" --json name,bucket --jq ".[] | select(.name == \"$required\") | .bucket" 2>/dev/null
 }
-for _ in $(seq 60); do
-	[[ -n $(check_state) ]] && break
-	sleep 5
+failures() {
+	gh pr checks "$pr" --json bucket --jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length' 2>/dev/null || echo 0
+}
+deadline=$((SECONDS + ${SHIP_CI_TIMEOUT:-3600}))
+until [[ $(check_state) == pass ]]; do
+	[[ $(failures) -eq 0 ]] || die "$failed"
+	((SECONDS < deadline)) || die "the '$required' check did not pass on #$pr in time; inspect CI, then rerun"
+	sleep 30
 done
-[[ -n $(check_state) ]] || die "the '$required' check never started on #$pr; inspect CI, then rerun"
-failed="CI failed on #$pr. Fix it and run scripts/ship.sh again, or close it: gh pr close $pr --delete-branch --comment '<reason>'"
-gh pr checks "$pr" --watch --fail-fast --interval 30 || die "$failed"
-[[ $(check_state) == pass ]] || die "$failed"
 
 gh pr merge "$pr" --merge --delete-branch ||
 	die "merging #$pr failed (conflicts?). Update the branch from $main, rerun, or close the PR"
@@ -84,4 +89,5 @@ git pull --quiet --ff-only origin "$main"
 git fetch --prune --quiet origin
 git branch --delete --force "$branch" 2>/dev/null || true
 echo "ship: merged #$pr"
-scripts/repo-status.sh
+# Other open work is reported, but does not make this delivery a failure.
+scripts/repo-status.sh || echo "ship: #$pr is merged; finish the open items above as well."

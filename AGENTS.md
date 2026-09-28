@@ -9,11 +9,12 @@ workstation-wide `~/AGENTS.md`. Project overview, commands and budgets: [README]
 When the requested work is finished and tests are green, deliver it in the same session. Don't stop
 with work sitting in the tree, on a branch, or in an open pull request.
 
-1. **Verify.** `npm test` always. Also run `npm run test:e2e` and `npm run check:size` when the UI,
-   rendering, build, data or assets changed. CI runs the full suite again before merging.
+1. **Verify.** `npm run lint` and `npm test` always (`npm run format` fixes formatting). Also run
+   `npm run test:e2e` and `npm run check:size` when the UI, rendering, build, data or assets
+   changed. CI runs the full suite again before merging.
 2. **Review the diff.** In Claude Code, run `/code-review`; otherwise read `git diff` critically.
    Fix what you find, and summarize the review and verification under `## Review` in the PR body.
-3. **Ship.** Run `scripts/ship.sh COMMIT_MESSAGE_FILE PR_BODY_FILE`. It runs the tests, moves the
+3. **Ship.** Run `scripts/ship.sh COMMIT_MESSAGE_FILE PR_BODY_FILE`. It runs lint and tests, moves the
    work off `main` onto a `work/…` branch, commits everything, pushes, and opens the pull request.
    It then waits for every CI check, merges with a merge commit, deletes the branch, and returns to
    an up-to-date `main`. Keep message and body files outside the repository (e.g. a temp or
@@ -46,6 +47,7 @@ paths. Parallel worktrees are fine during a task but must be merged or removed b
 ## Commands
 
 ```sh
+npm run lint           # Biome format + lint check (npm run format to fix)
 npm test               # unit tests (node --test)
 npm run test:e2e       # production build + Playwright journeys
 npm run check:size     # size budgets (after a build)

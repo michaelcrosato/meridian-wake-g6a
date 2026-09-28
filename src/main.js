@@ -586,7 +586,7 @@ function renderNew() {
 	return modal(
 		"Every captain starts somewhere.",
 		"A new voyage",
-		`<div class="ship-selection"><p>Your first ship shapes your first opportunities.<br>Trade, carry passengers, or earn your wings in combat. You can change ships later.</p></div><div class="item-grid">${starters.map((s, i) => `<article class="item-card ${s.id === selectedStarter ? "current" : ""}"><div class="eyebrow">${s.id === "sparrow" ? "The pathfinder" : s.id === "shuttle" ? "The courier" : "The merchant"}</div><div class="item-illustration">${shipDrawing(i)}</div><h3>${esc(s.name)}</h3><p>${esc(s.description || "A small ship with room for a bigger life.")}</p><div class="item-stats"><span>CARGO <b>${s.cargoCapacity ?? s.cargo ?? 0}t</b></span><span>BUNKS <b>${s.passengerCapacity ?? s.bunks ?? 0}</b></span></div><button data-action="selectStarter" data-id="${s.id}" class="${s.id === selectedStarter ? "primary" : ""}">${s.id === selectedStarter ? "Selected ✓" : "Choose " + esc(s.name)}</button></article>`).join("")}</div>`,
+		`<div class="ship-selection"><p>Your first ship shapes your first opportunities.<br>Trade, carry passengers, or earn your wings in combat. You can change ships later.</p></div><div class="item-grid">${starters.map((s, i) => `<article class="item-card ${s.id === selectedStarter ? "current" : ""}"><div class="eyebrow">${s.id === "sparrow" ? "The pathfinder" : s.id === "shuttle" ? "The courier" : "The merchant"}</div><div class="item-illustration">${shipDrawing(i)}</div><h3>${esc(s.name)}</h3><p>${esc(s.description || "A small ship with room for a bigger life.")}</p><div class="item-stats"><span>CARGO <b>${s.cargoCapacity ?? s.cargo ?? 0}t</b></span><span>BUNKS <b>${s.passengerCapacity ?? s.bunks ?? 0}</b></span></div><button data-action="selectStarter" data-id="${s.id}" class="${s.id === selectedStarter ? "primary" : ""}">${s.id === selectedStarter ? "Selected ✓" : `Choose ${esc(s.name)}`}</button></article>`).join("")}</div>`,
 		`<span>Starting funds and a modest ship loan. Your adventure saves locally.</span><button class="primary" data-action="begin">Begin voyage ${icon("arrow")}</button>`,
 	);
 }
@@ -994,7 +994,7 @@ function renderJournal() {
 				.slice(0, 35)
 				.map(
 					(entry) =>
-						`<div class="log-entry"><time>DAY ${esc(entry.day ?? s.day)}</time><p>${entry.title ? "<strong>" + esc(entry.title) + "</strong><br>" : ""}${esc(typeof entry === "string" ? entry : entry.message || entry.text)}</p></div>`,
+						`<div class="log-entry"><time>DAY ${esc(entry.day ?? s.day)}</time><p>${entry.title ? `<strong>${esc(entry.title)}</strong><br>` : ""}${esc(typeof entry === "string" ? entry : entry.message || entry.text)}</p></div>`,
 				)
 				.join("") ||
 			'<p class="muted small">The first page of your story is still blank.</p>'
@@ -1023,7 +1023,7 @@ function renderShip() {
 		st = stats();
 	return modal(
 		"Your home between the stars",
-		"Flagship / " + esc(st.name),
+		`Flagship / ${esc(st.name)}`,
 		`<div class="port-summary"><div class="item-illustration" style="height:160px">${shipDrawing(ships.findIndex((x) => x.id === s.shipId))}</div><div class="port-data"><div>Hull <strong>${Math.ceil(s.hull)} / ${st.maxHull}</strong></div><div>Shields <strong>${Math.ceil(s.shield)} / ${st.maxShield}</strong></div><div>Fuel <strong>${Math.floor(s.fuel)} / ${st.maxFuel}</strong></div><div>Free cargo capacity <strong>${st.cargoCapacity} tonnes total</strong></div><div>Passenger berths <strong>${st.passengerCapacity}</strong></div></div></div>${renderSecondary()}<h3 class="section-label">Installed equipment</h3><div class="job-list">${
 			(Array.isArray(s.outfits)
 				? s.outfits

@@ -150,7 +150,7 @@ test("complete opening voyage, economy, audio and persisted progress across this
 	expect(errors).toEqual([]);
 	await writeFile(
 		`${artifacts}/browser.json`,
-		JSON.stringify(
+		`${JSON.stringify(
 			{
 				browser: browserName,
 				version: browser.version(),
@@ -168,7 +168,7 @@ test("complete opening voyage, economy, audio and persisted progress across this
 			},
 			null,
 			2,
-		) + "\n",
+		)}\n`,
 	);
 });
 
@@ -243,7 +243,7 @@ test("title, menus, map and flight remain reachable across common CSS viewport s
 	}
 	await writeFile(
 		`${artifacts}/viewport-matrix.json`,
-		JSON.stringify(measurements, null, 2) + "\n",
+		`${JSON.stringify(measurements, null, 2)}\n`,
 	);
 });
 

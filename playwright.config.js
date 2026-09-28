@@ -3,7 +3,8 @@ export default defineConfig({
 	testDir: "./tests/e2e",
 	timeout: 90000,
 	expect: { timeout: 20000 },
-	fullyParallel: false,
+	// Tests are independent; CI shards them across runners. Locally they still run one at a time.
+	fullyParallel: true,
 	workers: 1,
 	reporter: "list",
 	use: {

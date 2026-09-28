@@ -237,7 +237,7 @@ try {
 	evidence.finishedAt = new Date().toISOString();
 	await writeFile(
 		`${artifacts}/evidence.json`,
-		JSON.stringify(evidence, null, 2) + "\n",
+		`${JSON.stringify(evidence, null, 2)}\n`,
 	);
 	await writeFile(`${artifacts}/runner.log`, output.join(""));
 	console.log(JSON.stringify(evidence, null, 2));
